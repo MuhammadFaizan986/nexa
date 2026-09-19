@@ -1,7 +1,8 @@
 """
 The ingestion pipeline: stored file -> searchable chunks.
 
-    parse  ->  clean  ->  chunk  ->  embed (batched)  ->  store chunks  ->  status=ready
+    parse  ->  clean  ->  chunk  ->  add context headers  ->  embed (batched)
+           ->  store chunks  ->  status=ready
 
 In Weeks 1–3 this runs synchronously inside the upload request. In Week 4 the
 exact same function is called from a Celery worker instead, so uploads return
@@ -36,6 +37,23 @@ class IngestionError(Exception):
     pass
 
 
+def build_context_header(title: str, heading_path: list[str]) -> str:
+    """
+    "Document: Residential Tenancy Agreement - Unit 4B | Section: 7. Term and Termination"
+
+    Contextual chunk headers (plan 9.1): a chunk like "Clause 7.2 ... 60 days
+    written notice" never mentions WHICH lease it belongs to, so on its own it
+    matches a question about Unit 7A just as well as one about Unit 4B. Putting
+    the document title and heading trail in front of what we embed and
+    keyword-index fixes that. The chunk's `content` stays clean for citations.
+    """
+    path = [h for h in heading_path if h != title]  # the title is often the first heading
+    header = f"Document: {title}"
+    if path:
+        header += " | Section: " + " > ".join(path)
+    return header
+
+
 async def ingest_document(session: AsyncSession, document_id: uuid.UUID) -> int:
     """Process one document. Returns the number of chunks created (0 on failure)."""
     settings = get_settings()
@@ -66,9 +84,20 @@ async def ingest_document(session: AsyncSession, document_id: uuid.UUID) -> int:
         if not chunks:
             raise IngestionError("No text could be extracted from this document")
 
-        # 4. Embed all chunks (the provider batches the API calls).
+        # 4. Embed all chunks (the provider batches the API calls). With contextual
+        #    headers on, the model sees "Document: ... | Section: ..." + the text.
+        title = (cleaned.title or document.title)[:300]
+        headers = [
+            build_context_header(title, chunk.heading_path) if settings.contextual_headers else None
+            for chunk in chunks
+        ]
         embedder = get_embedding_provider()
-        embedded = await embedder.embed([chunk.content for chunk in chunks])
+        embedded = await embedder.embed(
+            [
+                f"{header}\n\n{chunk.content}" if header else chunk.content
+                for header, chunk in zip(headers, chunks, strict=True)
+            ]
+        )
 
         # 5. Store. Deleting first makes the function safe to re-run (re-index).
         await session.execute(delete(Chunk).where(Chunk.document_id == document.id))
@@ -85,6 +114,7 @@ async def ingest_document(session: AsyncSession, document_id: uuid.UUID) -> int:
                     "page_start": chunk.page_start,
                     "page_end": chunk.page_end,
                     "section_title": chunk.section_title,
+                    "context_header": header,
                     "meta": {
                         "heading_path": chunk.heading_path,
                         "sections": chunk.sections,
@@ -100,14 +130,13 @@ async def ingest_document(session: AsyncSession, document_id: uuid.UUID) -> int:
                     },
                     "embedding": vector,
                 }
-                for chunk, vector in zip(chunks, embedded.vectors, strict=True)
+                for chunk, header, vector in zip(chunks, headers, embedded.vectors, strict=True)
             ],
         )
 
         document.status = DocumentStatus.READY
         document.page_count = cleaned.page_count
-        if cleaned.title:
-            document.title = cleaned.title[:300]
+        document.title = title
         record_usage(
             session,
             tenant_id=document.tenant_id,

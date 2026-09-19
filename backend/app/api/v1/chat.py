@@ -81,6 +81,7 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
         question=question.content,
         history=history,
         collection_ids=collection_ids,
+        filters=body.to_filters(),
     )
     return StreamingResponse(
         stream_answer(turn),

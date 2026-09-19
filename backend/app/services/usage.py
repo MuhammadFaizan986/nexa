@@ -36,6 +36,16 @@ PRICES_PER_MILLION_TOKENS: dict[str, tuple[Decimal, Decimal]] = {
     "fake-llm": (Decimal("0"), Decimal("0")),
 }
 
+# Rerankers are priced per SEARCH (one query + its candidate documents), not per
+# token. USD per search. Trial keys are free; this is what paid usage would cost.
+PRICES_PER_RERANK_SEARCH: dict[str, Decimal] = {
+    # Cohere — https://cohere.com/pricing
+    "rerank-v4.0-pro": Decimal("0.0025"),
+    "rerank-v4.0-fast": Decimal("0.002"),
+    "rerank-v3.5": Decimal("0.002"),
+    "fake-reranker": Decimal("0"),
+}
+
 _MILLION = Decimal(1_000_000)
 
 
@@ -47,6 +57,11 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int = 0) -> Deci
     return (input_tokens * input_price + output_tokens * output_price) / _MILLION
 
 
+def estimate_rerank_cost(model: str, searches: int = 1) -> Decimal | None:
+    price = PRICES_PER_RERANK_SEARCH.get(model)
+    return price * searches if price is not None else None
+
+
 def record_usage(
     session: AsyncSession,
     *,
@@ -56,8 +71,12 @@ def record_usage(
     model: str,
     input_tokens: int,
     output_tokens: int = 0,
+    cost_usd: Decimal | None = None,
 ) -> None:
-    """Adds the row to the session; the caller commits together with its other work."""
+    """
+    Adds the row to the session; the caller commits together with its other work.
+    `cost_usd` overrides the per-token estimate (e.g. per-search reranker pricing).
+    """
     session.add(
         UsageEvent(
             tenant_id=tenant_id,
@@ -65,6 +84,10 @@ def record_usage(
             event_type=event_type,
             model=model,
             tokens=input_tokens + output_tokens,
-            cost_usd=estimate_cost(model, input_tokens, output_tokens),
+            cost_usd=(
+                cost_usd
+                if cost_usd is not None
+                else estimate_cost(model, input_tokens, output_tokens)
+            ),
         )
     )

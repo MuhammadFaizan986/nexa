@@ -36,6 +36,7 @@ dependencies = [
     "openai>=3.16,<4",               # embeddings (+ optional chat)
     "google-genai>=2.24,<3",         # Gemini embeddings (free tier available)
     "anthropic>=1.7,<2",             # Claude for answer generation
+    "cohere>=7.1,<8",                # Cohere Rerank (reranking retrieved passages)
 
     # --- HTTP client (used by scripts/ and the test client) ---
     "httpx>=0.28",

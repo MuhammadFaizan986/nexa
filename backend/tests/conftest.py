@@ -35,6 +35,10 @@ os.environ.update(
         # The hashing test embedder gives lower similarity scores than a real
         # model, so the "I don't know" gate is set to match it.
         "MIN_RELEVANCE_SCORE": "0.15",
+        # Offline word-overlap reranker; its score = share of the question's words
+        # found in the passage, so 0.2 means "at least a fifth of them".
+        "RERANKER_PROVIDER": "fake",
+        "MIN_RERANK_SCORE": "0.2",
     }
 )
 

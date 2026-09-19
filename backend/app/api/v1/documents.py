@@ -23,14 +23,14 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, SessionDep
 from app.core.logging import get_logger
 from app.db.models import Chunk, Collection, Document, DocumentStatus, User
-from app.schemas.documents import DocumentDetail, DocumentOut, UploadResult
+from app.schemas.documents import DocumentDetail, DocumentOut, DocumentUpdate, UploadResult
 from app.services.ingestion.parsers import MIME_TYPES, SUPPORTED_EXTENSIONS
 from app.services.ingestion.pipeline import ingest_document
 from app.services.retrieval.permissions import can_write_collection, readable_collection_ids
@@ -106,6 +106,34 @@ async def get_document(
     return DocumentDetail(
         **DocumentOut.model_validate(document).model_dump(), chunk_count=chunk_count or 0
     )
+
+
+@router.patch("/{document_id}", response_model=DocumentOut)
+async def update_document(
+    document_id: uuid.UUID, body: DocumentUpdate, user: CurrentUser, session: SessionDep
+) -> Document:
+    """
+    Replace a document's metadata. Every chunk keeps a copy under
+    metadata.doc (so filters can use the chunks' GIN index), so we update those
+    copies in the same transaction. No re-embedding is needed: metadata isn't
+    part of what gets embedded.
+    """
+    document = await _get_readable_document(session, user, document_id)
+    collection = await session.get(Collection, document.collection_id)
+    if collection is None or not can_write_collection(user, collection):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't edit this document")
+
+    document.meta = body.metadata
+    await session.execute(
+        text(
+            "UPDATE chunks SET metadata = jsonb_set(metadata, '{doc}', CAST(:meta AS jsonb)) "
+            "WHERE document_id = :document_id"
+        ),
+        {"meta": json.dumps(body.metadata), "document_id": document.id},
+    )
+    await session.commit()
+    await session.refresh(document)
+    return document
 
 
 # ----------------------------------------------------------------------------- helpers

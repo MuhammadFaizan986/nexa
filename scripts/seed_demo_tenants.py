@@ -9,13 +9,15 @@ It uses the public HTTP API exactly like a real client would, so it doubles as
 an end-to-end smoke test of register -> login -> upload -> ingest.
 
 Safe to run repeatedly: an existing tenant is logged into instead of
-re-registered, and files already uploaded come back as "duplicate".
+re-registered, and files already uploaded come back as "duplicate" (their
+metadata is updated if it changed, so metadata filters always have data).
 
 All sample documents are synthetic (fictional companies). With the OpenAI
 embedding provider, seeding all 16 documents costs well under one US cent.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +33,30 @@ TENANTS = {
     "company": ("Lumen Labs", "owner@lumenlabs.example.com"),
 }
 SUPPORTED = {".pdf", ".docx", ".md", ".txt"}
+
+# Per-document metadata, used by metadata filters, e.g. {"doc_type": "lease"} or
+# a date range on "date" (ISO format). A real client would send this at upload.
+DOC_METADATA: dict[str, dict] = {
+    # property
+    "building_c_rules.md": {"doc_type": "house_rules", "building": "C"},
+    "inspection_reports_2026.pdf": {"doc_type": "inspection_report"},
+    "lease_unit_4b.pdf": {"doc_type": "lease", "unit": "4B", "building": "A", "date": "2026-03-01"},
+    "lease_unit_7a.pdf": {"doc_type": "lease", "unit": "7A", "building": "C", "date": "2025-11-01"},
+    "maintenance_policy.docx": {"doc_type": "policy"},
+    "tenant_welcome_guide.txt": {"doc_type": "guide"},
+    # fintech
+    "customer_faq.md": {"doc_type": "faq", "audience": "customer"},
+    "fee_schedule.pdf": {"doc_type": "fee_schedule", "audience": "customer"},
+    "internal_chargeback_procedure.txt": {"doc_type": "procedure", "audience": "internal"},
+    "kyc_aml_policy.docx": {"doc_type": "policy", "audience": "compliance"},
+    "payment_error_codes.md": {"doc_type": "reference", "audience": "customer"},
+    # company
+    "api_documentation.md": {"doc_type": "technical_docs"},
+    "employee_handbook.pdf": {"doc_type": "hr_policy"},
+    "it_security_policy.docx": {"doc_type": "policy"},
+    "onboarding_sop.txt": {"doc_type": "sop"},
+    "release_notes.md": {"doc_type": "release_notes", "date": "2026-08-12"},
+}
 
 
 def authenticate(client: httpx.Client, name: str, email: str) -> tuple[str, str]:
@@ -61,22 +87,29 @@ def seed(client: httpx.Client, domain: str, name: str, email: str) -> bool:
 
     files = sorted(p for p in (SAMPLE_DATA / domain).iterdir() if p.suffix in SUPPORTED)
     print(f"\n== {name}  (tenant slug: {slug})  — uploading {len(files)} files")
-    handles = [open(p, "rb") for p in files]  # noqa: SIM115 (closed below)
-    try:
-        response = client.post(
-            "/documents",
-            headers=headers,
-            data={"collection_id": general["id"], "metadata": f'{{"domain": "{domain}"}}'},
-            files=[("files", (p.name, h)) for p, h in zip(files, handles, strict=True)],
-        )
-    finally:
-        for h in handles:
-            h.close()
-    response.raise_for_status()
-
     ok = True
-    for result in response.json():
+    # One request per file, so each document gets its own metadata.
+    for path in files:
+        metadata = {"domain": domain, **DOC_METADATA.get(path.name, {})}
+        with path.open("rb") as handle:
+            response = client.post(
+                "/documents",
+                headers=headers,
+                data={"collection_id": general["id"], "metadata": json.dumps(metadata)},
+                files=[("files", (path.name, handle))],
+            )
+        response.raise_for_status()
+        result = response.json()[0]
         document = result.get("document") or {}
+
+        # Already uploaded earlier: make sure its metadata is current.
+        if result["status"] == "duplicate" and document and document["metadata"] != metadata:
+            patched = client.patch(
+                f"/documents/{document['id']}", headers=headers, json={"metadata": metadata}
+            )
+            patched.raise_for_status()
+            result["status"] = "updated"
+
         state = document.get("status", "-")
         line = f"  {result['status']:<9} {state:<7} {result['filename']}"
         if document.get("page_count"):

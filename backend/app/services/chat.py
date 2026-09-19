@@ -2,8 +2,8 @@
 The question-answering pipeline, streamed to the client as Server-Sent Events.
 
     question
-      -> embed the question                          (latency: embed_query)
-      -> semantic search, permission-filtered         (latency: retrieval)
+      -> retrieve: embed, semantic + keyword search, fuse, rerank
+                                   (latency: embed_query, semantic, keyword, rerank, retrieval)
       -> relevance gate: best score too low? -> "I don't know", no LLM call
       -> LLM streams an answer citing [n] passages    (latency: llm_first_token, llm_total)
       -> validate citations, save message + citations + usage
@@ -37,7 +37,6 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models import Message, MessageCitation, MessageRole, UsageEventType
 from app.db.session import SessionLocal
-from app.services.embeddings import get_embedding_provider
 from app.services.generation.citations import CitationResult, resolve_citations
 from app.services.generation.llm import StreamEnd, TextDelta, get_llm_provider
 from app.services.generation.prompts import (
@@ -46,8 +45,14 @@ from app.services.generation.prompts import (
     build_user_message,
     history_for_prompt,
 )
-from app.services.retrieval.semantic import RetrievedChunk, semantic_search
-from app.services.usage import estimate_cost, record_usage
+from app.services.retrieval.base import RetrievedChunk, SearchFilters
+from app.services.retrieval.retriever import (
+    gate_score,
+    passes_relevance_gate,
+    record_retrieval_usage,
+    retrieve,
+)
+from app.services.usage import estimate_cost, estimate_rerank_cost, record_usage
 
 log = get_logger(__name__)
 
@@ -66,6 +71,7 @@ class ChatTurn:
     question: str
     history: list[dict]
     collection_ids: list[uuid.UUID]
+    filters: SearchFilters | None = None
 
 
 def sse(event: str, data: dict) -> str:
@@ -88,27 +94,22 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
 
     try:
         async with SessionLocal() as session:
-            # 1. Embed the question with the SAME model used for the chunks.
-            embedder = get_embedding_provider()
-            t = time.perf_counter()
-            query = await embedder.embed_query(turn.question)
-            latency["embed_query"] = _ms(t)
-
-            # 2. Retrieve (tenant + permission filtered inside the SQL).
-            t = time.perf_counter()
-            passages = await semantic_search(
+            # 1-2. Retrieve: embed the question, run semantic + keyword search
+            #      (tenant, permission and metadata filters inside the SQL), fuse
+            #      them, rerank the best candidates. See services/retrieval/.
+            retrieval = await retrieve(
                 session,
                 tenant_id=turn.tenant_id,
                 collection_ids=turn.collection_ids,
-                query_vector=query.vectors[0],
-                limit=settings.retrieval_top_k,
+                query=turn.question,
+                filters=turn.filters,
             )
-            latency["retrieval"] = _ms(t)
+            passages = retrieval.chunks
+            latency.update(retrieval.latency_ms)
 
             # 3. Relevance gate. If even the best passage is barely related, the
             #    honest answer is "I don't know" — and we save the LLM call.
-            top_score = passages[0].score if passages else None
-            low_relevance = top_score is None or top_score < settings.min_relevance_score
+            low_relevance = not passes_relevance_gate(retrieval)
 
             answer_parts: list[str] = []
             end: StreamEnd | None = None
@@ -165,7 +166,9 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                     "no_answer": low_relevance or NO_ANSWER.lower() in answer.lower(),
                     "low_relevance": low_relevance,
                     "stop_reason": end.stop_reason if end else None,
-                    "top_score": top_score,
+                    "retrieval_mode": retrieval.mode,
+                    "reranked": retrieval.reranked,
+                    "gate_score": gate_score(retrieval),
                     "retrieved": _retrieval_trace(passages),
                     "invalid_citations": cited.invalid_numbers,
                 },
@@ -183,13 +186,8 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                         snippet=c.snippet,
                     )
                 )
-            record_usage(
-                session,
-                tenant_id=turn.tenant_id,
-                user_id=turn.user_id,
-                event_type=UsageEventType.EMBED,
-                model=embedder.model,
-                input_tokens=query.tokens,
+            record_retrieval_usage(
+                session, retrieval, tenant_id=turn.tenant_id, user_id=turn.user_id
             )
             if end:
                 record_usage(
@@ -208,7 +206,9 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
             conversation_id=str(turn.conversation_id),
             message_id=str(message.id),
             passages=len(passages),
-            top_score=round(top_score, 4) if top_score is not None else None,
+            mode=retrieval.mode,
+            reranked=retrieval.reranked,
+            gate_score=round(gate_score(retrieval) or 0.0, 4),
             low_relevance=low_relevance,
             citations=len(cited.citations),
             invalid_citations=len(cited.invalid_numbers),
@@ -225,11 +225,7 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                 "usage": {
                     "input_tokens": message.input_tokens,
                     "output_tokens": message.output_tokens,
-                    "cost_usd": (
-                        estimate_cost(end.model, end.input_tokens, end.output_tokens)
-                        if end
-                        else None
-                    ),
+                    "cost_usd": _question_cost(retrieval, end),
                 },
                 "latency_ms": latency,
             },
@@ -242,6 +238,31 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
 
 
 def _retrieval_trace(passages: list[RetrievedChunk]) -> list[dict]:
+    """Every stage's score for each passage: why did it rank where it did?"""
+
+    def rounded(value: float | None) -> float | None:
+        return round(value, 4) if value is not None else None
+
     return [
-        {"rank": p.rank, "chunk_id": str(p.chunk_id), "score": round(p.score, 4)} for p in passages
+        {
+            "rank": p.rank,
+            "chunk_id": str(p.chunk_id),
+            "similarity": rounded(p.similarity),
+            "keyword": rounded(p.keyword_score),
+            "rerank": rounded(p.rerank_score),
+        }
+        for p in passages
     ]
+
+
+def _question_cost(retrieval, end: StreamEnd | None):
+    """LLM + reranker + question-embedding cost for this answer (None if unknown)."""
+    parts = []
+    if end:
+        parts.append(estimate_cost(end.model, end.input_tokens, end.output_tokens))
+    if retrieval.reranked and retrieval.reranker_model:
+        parts.append(estimate_rerank_cost(retrieval.reranker_model))
+    if retrieval.embedding_model:
+        parts.append(estimate_cost(retrieval.embedding_model, retrieval.embedding_tokens))
+    known = [p for p in parts if p is not None]
+    return sum(known) if known else None

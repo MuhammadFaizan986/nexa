@@ -3,6 +3,9 @@ Semantic (vector) search with pgvector.
 
 Idea: embed the question, then find the chunks whose embeddings are nearest to
 it by cosine distance (`<=>`). Postgres answers that with the HNSW index.
+Strength: finds paraphrases ("end my lease" ~ "terminate the tenancy").
+Weakness: exact identifiers. To an embedding model "E-204" and "E-205" look
+almost the same — that's what keyword search (keyword.py) is for.
 
 Two pgvector details that matter in a multi-tenant system (plan section 9.2):
 
@@ -24,57 +27,35 @@ transaction, so they can't leak into other requests sharing a pooled connection.
 """
 
 import uuid
-from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.services.retrieval.base import CHUNK_COLUMNS, RetrievedChunk, SearchFilters
 
+# Re-exported: older modules import RetrievedChunk from here.
+__all__ = ["RetrievedChunk", "semantic_search", "to_pgvector"]
 
-@dataclass
-class RetrievedChunk:
-    chunk_id: uuid.UUID
-    document_id: uuid.UUID
-    document_title: str
-    filename: str
-    content: str
-    page_start: int | None
-    page_end: int | None
-    section_title: str | None
-    score: float  # cosine similarity: 1.0 = identical direction, ~0 = unrelated
-    rank: int  # 1 = best
-    # [char_offset, page, section] where each page/section starts in `content`
-    # (see chunker.py). None for chunks indexed before spans existed.
-    spans: list | None = None
-
-
-_SEMANTIC_SQL = text("""
+_SEMANTIC_SQL = """
     WITH nearest AS MATERIALIZED (
         SELECT c.id,
                c.embedding <=> CAST(:query_vec AS vector) AS distance
         FROM chunks c
         WHERE c.tenant_id = :tenant_id                -- tenant isolation
           AND c.collection_id = ANY(:collection_ids)  -- permission filter, BEFORE ranking
+          {filters}
         ORDER BY c.embedding <=> CAST(:query_vec AS vector)
         LIMIT :limit
     )
-    SELECT c.id            AS chunk_id,
-           c.document_id,
-           d.title         AS document_title,
-           d.filename,
-           c.content,
-           c.page_start,
-           c.page_end,
-           c.section_title,
-           c.metadata -> 'spans' AS spans,
-           1 - n.distance  AS score
+    SELECT {columns},
+           1 - n.distance AS score
     FROM nearest n
     JOIN chunks c    ON c.id = n.id
     JOIN documents d ON d.id = c.document_id
     WHERE d.status = 'ready'
     ORDER BY n.distance
-""")
+"""
 
 
 def to_pgvector(vector: list[float]) -> str:
@@ -89,6 +70,7 @@ async def semantic_search(
     collection_ids: list[uuid.UUID],
     query_vector: list[float],
     limit: int,
+    filters: SearchFilters | None = None,
 ) -> list[RetrievedChunk]:
     if not collection_ids:
         return []  # the user can't read anything: nothing to search
@@ -99,13 +81,18 @@ async def semantic_search(
         text("SELECT set_config('hnsw.ef_search', :ef, true)"),
         {"ef": str(max(settings.hnsw_ef_search, limit))},
     )
+    filter_sql, filter_params = (filters or SearchFilters()).to_sql()
     rows = await session.execute(
-        _SEMANTIC_SQL,
+        text(_SEMANTIC_SQL.format(columns=CHUNK_COLUMNS, filters=filter_sql)),
         {
             "query_vec": to_pgvector(query_vector),
             "tenant_id": tenant_id,
             "collection_ids": collection_ids,
             "limit": limit,
+            **filter_params,
         },
     )
-    return [RetrievedChunk(**row._mapping, rank=rank) for rank, row in enumerate(rows, start=1)]
+    return [
+        RetrievedChunk(**row._mapping, rank=rank, similarity=row.score)
+        for rank, row in enumerate(rows, start=1)
+    ]

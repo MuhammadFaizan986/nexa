@@ -45,6 +45,12 @@ class DocumentDetail(DocumentOut):
     chunk_count: int
 
 
+class DocumentUpdate(BaseModel):
+    # Replaces the document's metadata (used by metadata filters), e.g.
+    # {"doc_type": "lease", "unit": "4B", "building": "A", "date": "2026-03-01"}.
+    metadata: dict[str, str | int | float | bool]
+
+
 class UploadResult(BaseModel):
     filename: str
     status: Literal["created", "duplicate", "retried", "rejected"]

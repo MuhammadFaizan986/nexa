@@ -2,7 +2,7 @@
 COMPOSE = docker compose
 API = $(COMPOSE) exec api
 
-.PHONY: help up down logs test test-unit lint format seed ask reindex psql migrate shell
+.PHONY: help up down logs test test-unit lint format seed ask reindex eval psql migrate shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ ask:  ## Ask a question: make ask TENANT=property Q="What is the notice period f
 
 reindex:  ## Re-process documents after chunker/embedding changes (ARGS="--tenant kestrel-pay")
 	$(API) python /scripts/reindex.py $(ARGS)
+
+eval:  ## Measure retrieval quality on the 50-question eval set (ARGS="--label baseline")
+	$(API) python -m eval.run_eval $(ARGS)
 
 psql:  ## Open a SQL shell on the dev database
 	$(COMPOSE) exec db psql -U nexa -d nexa

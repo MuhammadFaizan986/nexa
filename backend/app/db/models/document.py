@@ -108,10 +108,19 @@ class Chunk(Base):
     page_start: Mapped[int | None] = mapped_column(Integer)
     page_end: Mapped[int | None] = mapped_column(Integer)
     section_title: Mapped[str | None] = mapped_column(Text)
+    # "Document: <title> | Section: <headings>": embedded and keyword-indexed
+    # together with `content` (contextual chunk headers, migration 0003).
+    context_header: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, server_default=text("'{}'"))
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
-    # GENERATED column: Postgres computes it from `content` on every insert/update,
-    # so it can never drift out of sync. SQLAlchemy knows not to insert into it.
+    # GENERATED column: Postgres computes it from the header + content on every
+    # insert/update, so it can never drift out of sync. SQLAlchemy knows not to
+    # insert into it. Header words get weight B, content words weight A.
     tsv: Mapped[str] = mapped_column(
-        TSVECTOR, Computed("to_tsvector('english', content)", persisted=True)
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(context_header, '')), 'B') "
+            "|| setweight(to_tsvector('english', content), 'A')",
+            persisted=True,
+        ),
     )

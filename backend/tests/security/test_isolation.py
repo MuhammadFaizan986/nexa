@@ -154,3 +154,14 @@ async def test_duplicate_upload_reveals_nothing_about_a_hidden_document(
     result = response.json()[0]
     assert result["status"] == "duplicate"
     assert result["document"] is None  # no title, id or collection of the hidden doc
+
+
+async def test_every_search_mode_is_tenant_isolated(client, make_tenant):
+    tenant_a = await make_tenant("Tenant A")
+    tenant_b = await make_tenant("Tenant B")
+    await tenant_a.upload("zebra.md", SECRET_DOC)
+    for mode in ("semantic", "keyword", "hybrid"):
+        response = await client.post(
+            "/search", headers=tenant_b.headers, json={"query": "zebra cobalt merger", "mode": mode}
+        )
+        assert response.json()["results"] == [], mode

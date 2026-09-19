@@ -9,6 +9,7 @@ from app.db.models.enums import (
     UsageEventType,
     UserRole,
 )
+from app.db.models.eval import EvalResult, EvalRun
 from app.db.models.tenant import Collection, Tenant, User
 from app.db.models.usage import UsageEvent
 
@@ -20,6 +21,8 @@ __all__ = [
     "Conversation",
     "Document",
     "DocumentStatus",
+    "EvalResult",
+    "EvalRun",
     "Message",
     "MessageCitation",
     "MessageRole",

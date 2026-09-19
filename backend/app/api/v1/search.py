@@ -1,22 +1,21 @@
 """
-Search only (no LLM): returns the ranked passages.
+Search only (no LLM): returns the ranked passages with every stage's score.
 
 Useful for debugging retrieval ("did it even find the right chunk?") and for
-demos: in Week 3 the same endpoint gains mode=keyword|hybrid and rerank=true,
-so you can show a client side by side why hybrid search beats pure semantic.
+client demos: run the same question with mode=semantic, keyword and hybrid,
+with and without the reranker, and show side by side why hybrid + reranking
+wins (exact identifiers like "E-204" are the classic example).
 """
 
-import time
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.deps import CurrentUser, SessionDep
-from app.db.models import UsageEventType
 from app.schemas.chat import SearchHit, SearchRequest, SearchResponse
-from app.services.embeddings import get_embedding_provider
 from app.services.retrieval.permissions import CollectionAccessError, resolve_search_scope
-from app.services.retrieval.semantic import semantic_search
-from app.services.usage import record_usage
+from app.services.retrieval.reranker import RerankerConfigError
+from app.services.retrieval.retriever import record_retrieval_usage, retrieve
 
 router = APIRouter(tags=["search"])
 
@@ -28,34 +27,25 @@ async def search(body: SearchRequest, user: CurrentUser, session: SessionDep) ->
     except CollectionAccessError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Collection not found") from None
 
-    embedder = get_embedding_provider()
-    t0 = time.perf_counter()
-    query = await embedder.embed_query(body.query)
-    t1 = time.perf_counter()
-    hits = await semantic_search(
-        session,
-        tenant_id=user.tenant_id,
-        collection_ids=collection_ids,
-        query_vector=query.vectors[0],
-        limit=body.top_k,
-    )
-    t2 = time.perf_counter()
+    try:
+        result = await retrieve(
+            session,
+            tenant_id=user.tenant_id,
+            collection_ids=collection_ids,
+            query=body.query,
+            mode=body.mode,
+            rerank=body.rerank,
+            top_k=body.top_k,
+            filters=body.to_filters(),
+        )
+    except RerankerConfigError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
-    record_usage(
-        session,
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        event_type=UsageEventType.EMBED,
-        model=embedder.model,
-        input_tokens=query.tokens,
-    )
+    record_retrieval_usage(session, result, tenant_id=user.tenant_id, user_id=user.id)
     await session.commit()
-
     return SearchResponse(
-        mode=body.mode,
-        results=[SearchHit(**vars(hit)) for hit in hits],
-        latency_ms={
-            "embed_query": round((t1 - t0) * 1000),
-            "retrieval": round((t2 - t1) * 1000),
-        },
+        mode=result.mode,
+        reranked=result.reranked,
+        results=[SearchHit(**asdict(chunk)) for chunk in result.chunks],
+        latency_ms=result.latency_ms,
     )

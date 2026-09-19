@@ -30,11 +30,12 @@ async def test_search_ranks_the_relevant_document_first(client, make_tenant):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["mode"] == "semantic"
-    assert set(body["latency_ms"]) == {"embed_query", "retrieval"}
+    assert body["mode"] == "hybrid" and body["reranked"] is True  # the defaults
+    assert {"embed_query", "semantic", "keyword", "rerank", "retrieval"} <= set(body["latency_ms"])
     top = body["results"][0]
     assert top["document_title"] == "Lease Agreement - Unit 4B"
     assert top["rank"] == 1
+    assert top["rerank_score"] is not None and top["similarity"] is not None
     assert body["results"][0]["score"] >= body["results"][-1]["score"]
 
 

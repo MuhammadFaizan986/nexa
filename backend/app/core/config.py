@@ -79,15 +79,40 @@ class Settings(BaseSettings):
     # A section shorter than this is merged with the next one instead of becoming
     # its own tiny chunk (tiny chunks embed poorly and waste retrieval slots).
     chunk_min_tokens: int = 150
+    # Prefix what we embed/index with "Document: <title> | Section: <headings>" so a
+    # chunk that never names its document ("7. Termination ...") still matches
+    # questions about it ("Unit 4B notice period"). Changing it needs `make reindex`.
+    contextual_headers: bool = True
 
     # ------------------------------------------------------------------ retrieval
+    # semantic = meaning only; keyword = exact words only; hybrid = both, fused (RRF).
+    retrieval_mode: Literal["semantic", "keyword", "hybrid"] = "hybrid"
+    # Passages given to the LLM.
     retrieval_top_k: int = 5
+    # How many results each search (semantic, keyword) returns before fusion.
+    retrieval_candidates: int = 40
+    # How many fused candidates the reranker re-scores (it's the slow, precise step).
+    rerank_candidates: int = 20
+    # The "k" in Reciprocal Rank Fusion: 1 / (k + rank). 60 is the value from the
+    # original RRF paper; larger k flattens the difference between ranks.
+    rrf_k: int = 60
     # HNSW search breadth. Higher = better recall, slower queries. pgvector's
     # default is 40; we raise it because tenant/collection filters discard rows.
     hnsw_ef_search: int = 100
-    # "I don't know" gate: if the best passage's cosine similarity is below this,
-    # we don't call the LLM at all. MUST be tuned on your eval set.
+    # "I don't know" gates. Without a reranker we gate on the best cosine
+    # similarity; with one, on the best rerank score (a much sharper signal).
+    # Both MUST be tuned on the eval set: `make eval` prints suggested values.
     min_relevance_score: float = 0.30
+    min_rerank_score: float = 0.80  # measured with rerank-v4.0-pro, see docs/evaluation-results.md
+
+    # ------------------------------------------------------------------ reranking
+    # none = skip reranking. cohere = Cohere Rerank API. fake = offline, for tests.
+    reranker_provider: Literal["none", "cohere", "fake"] = "none"
+    reranker_model: str = "rerank-v4.0-pro"
+    cohere_api_key: SecretStr | None = None
+    # Client-side pacing. Cohere TRIAL keys allow 10 rerank calls per minute; we
+    # space calls out instead of hitting 429 errors. 0 = no pacing (production keys).
+    rerank_max_per_minute: int = 10
     # How many previous messages (user + assistant) to send as chat history.
     history_messages: int = 6
 
@@ -98,6 +123,7 @@ class Settings(BaseSettings):
         "openai_api_key",
         "gemini_api_key",
         "anthropic_api_key",
+        "cohere_api_key",
         mode="before",
     )
     @classmethod

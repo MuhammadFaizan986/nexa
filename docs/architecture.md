@@ -4,8 +4,9 @@ This page follows a document and then a question through the code, file by
 file, in the order the code runs. Each module's docstring explains why its
 technique exists.
 
-Status: **Weeks 0–2 complete**. Semantic search only; hybrid search and
-reranking arrive in Week 3.
+Status: **Weeks 0–3 complete**: hybrid retrieval with reranking, contextual
+chunk headers, metadata filters and a retrieval eval
+([results](evaluation-results.md)).
 
 ---
 
@@ -59,7 +60,8 @@ for c in chunk_blocks(clean_document(parse_file(f, f.name)).blocks):
 ## 3. Question answering: `POST /api/v1/chat`
 
 ```
-question ─▶ permission scope ─▶ embed question ─▶ semantic search (top 5, filtered in SQL)
+question ─▶ permission scope ─▶ embed ─▶ semantic (40) + keyword (40) + identifier search
+         ─▶ RRF fusion ─▶ top 20 ─▶ reranker ─▶ top 5        (all filtered inside the SQL)
          ─▶ relevance gate ──(too low)──▶ "I don't have enough information…" (no LLM call)
          ─▶ prompt with numbered <passage>s ─▶ LLM streams tokens (SSE) ─▶ validate [n] citations
          ─▶ save message + citations + usage + latency
@@ -69,8 +71,13 @@ question ─▶ permission scope ─▶ embed question ─▶ semantic search (t
 |---|---|---|
 | Scope + conversation | `backend/app/api/v1/chat.py` | Resolves readable collections; loads/creates the conversation (must belong to this user); saves the question; returns a `StreamingResponse` |
 | Permissions | `backend/app/services/retrieval/permissions.py` | Deny by default. `tenant_wide` collections for everyone; `restricted` ones only for owners/admins until Week 4 groups. Asking for an unreadable collection → 404 |
-| Search | `backend/app/services/retrieval/semantic.py` | `embedding <=> query` with `WHERE tenant_id = … AND collection_id = ANY(…)` **inside** the query; pgvector iterative scans so filters don't starve the result list |
-| Relevance gate | `backend/app/services/chat.py` | If the best cosine similarity < `MIN_RELEVANCE_SCORE`, answer "I don't know" without calling the LLM |
+| Pipeline | `backend/app/services/retrieval/retriever.py` | `retrieve()`: the same code serves `/search`, `/chat` and `make eval`; every stage can be switched on/off |
+| Semantic | `backend/app/services/retrieval/semantic.py` | `embedding <=> query` with `WHERE tenant_id = … AND collection_id = ANY(…)` **inside** the query; pgvector iterative scans so filters don't starve the result list |
+| Keyword | `backend/app/services/retrieval/keyword.py` | Postgres full-text (`tsv @@ query`, `ts_rank_cd`); ANDs turned into ORs for natural questions; identifier boost because Postgres ranking has no IDF |
+| Fusion | `backend/app/services/retrieval/hybrid.py` | Reciprocal Rank Fusion: `1 / (60 + rank)` summed across lists; keeps every stage's score |
+| Rerank | `backend/app/services/retrieval/reranker.py` | Cohere Rerank (cross-encoder) re-scores the top 20; paced for trial keys; fake reranker for tests |
+| Filters | `backend/app/services/retrieval/base.py` | `SearchFilters`: document metadata (`@>` on the GIN index) and a date range, as extra SQL clauses |
+| Relevance gate | `backend/app/services/retrieval/retriever.py` | Rerank score < `MIN_RERANK_SCORE` (or, without a reranker, similarity < `MIN_RELEVANCE_SCORE`) → "I don't know" without calling the LLM |
 | Prompt | `backend/app/services/generation/prompts.py` | Rules in the system prompt; passages XML-escaped inside `<passage id="n">` tags; old `[n]` markers stripped from history |
 | LLM | `backend/app/services/generation/llm.py` | One interface, three providers: Claude (default, with server-side refusal fallback), OpenAI, fake |
 | Citations | `backend/app/services/generation/citations.py` | Parse `[1]`, `[2][3]`, `[2, 3]`; drop numbers that don't match a passage; pick the best-matching sentence as the snippet |
@@ -98,9 +105,10 @@ models.
 
 | Limitation | Fixed in |
 |---|---|
-| Semantic search only: exact identifiers like `E-204` or `INS-2026-0259` can be missed | Week 3: keyword + hybrid (RRF) + reranking |
-| Chunks don't carry their document's context: the "Termination" section of the 4B and 7A leases look alike, because "Unit 4B" appears only in the title | Week 3: contextual chunk headers |
+| ~~Semantic search only: exact identifiers like `E-204` can be missed~~ | ✅ Week 3: keyword + identifier boost + RRF (exact identifiers now 100% Hit@5) |
+| ~~Chunks don't carry their document's context (4B vs 7A leases)~~ | ✅ Week 3: contextual chunk headers (semantic Hit@1 70% → 85%) |
+| Postgres keyword ranking has no IDF (rare words aren't weighted up) | Mitigated by the identifier boost; a BM25 extension (e.g. ParadeDB) is an option at scale |
 | Follow-up questions ("and for Unit 7A?") are searched as-is | Week 6: query rewriting |
 | Ingestion runs inside the upload request | Week 4: Celery background jobs |
 | Restricted collections are admin-only; no groups yet; no RLS | Week 4: groups, collection access, Row-Level Security |
-| `MIN_RELEVANCE_SCORE` is a starting guess | Week 3: tune it with the eval set's unanswerable questions |
+| Similarity can't separate answerable from unanswerable questions | Gate on the reranker score; tune `MIN_RERANK_SCORE` from `make eval` |
