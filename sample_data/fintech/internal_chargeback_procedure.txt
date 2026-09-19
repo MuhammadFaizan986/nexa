@@ -1,0 +1,59 @@
+KESTREL PAY - DISPUTES AND CHARGEBACKS PROCEDURE
+
+Synthetic demo document — fictional company, not real data.
+
+Procedure DCP-04, version 3.1. Classification: INTERNAL - Operations staff only. Owner: Disputes Team Lead, Payments Operations. Effective 1 March 2026.
+
+
+1. PURPOSE
+
+This procedure explains how Operations staff handle customer disputes about card transactions, from the moment a dispute is lodged until the case is closed. It supports the promises made to customers in the Customer FAQ and the Kestrel Pay fee schedule (disputes are free for customers).
+
+
+2. INTAKE
+
+Disputes arrive from the app ("Report an issue"), the in-app chat or the phone team. Every dispute must be logged in the CaseDesk system within 1 business day of being received. CaseDesk assigns a case ID in the format DSP-2026-00000.
+
+Check that the dispute was lodged within 60 days of the statement date on which the transaction first appeared. Disputes lodged later than this are declined, unless the Disputes Team Lead approves an exception.
+
+
+3. TRIAGE
+
+Classify each case as one of: (a) fraud - the customer did not make or authorise the transaction; (b) merchant dispute - goods or services not received, not as described, or a cancelled subscription still being charged; (c) processing error - duplicate charge or incorrect amount.
+
+For fraud cases, block the card immediately (error code E-302 will appear on further attempts) and order a free replacement card for the customer. Fraud cases are also referred to the Fraud team through CaseDesk within 1 business day.
+
+
+4. PROVISIONAL CREDIT
+
+For disputes over $50, apply a provisional credit for the disputed amount within 10 business days of intake. Disputes of $50 or less do not receive a provisional credit, but are still investigated.
+
+
+5. CHARGEBACK SUBMISSION
+
+Merchant disputes and fraud cases are submitted to the card scheme as a chargeback within 20 days of intake. The card scheme deadline is 120 days from the transaction date, so cases close to that deadline must be submitted on the same day they are received. Attach all evidence from the customer, including receipts, emails and delivery tracking.
+
+
+6. MERCHANT RESPONSE
+
+The merchant has 30 days to respond to a chargeback (representment). If the merchant provides evidence that the transaction was valid, review it with the customer before deciding whether to take the case to pre-arbitration.
+
+
+7. ESCALATION
+
+Escalate the following cases to the Disputes Team Lead, Hannah Ferreira:
+- any dispute of more than $5,000;
+- any case where the customer has lodged three or more disputes in 90 days;
+- any case where the customer is unhappy with how the dispute is being handled.
+
+Cases still unresolved 45 days after intake must be escalated to the Head of Operations, Marcus Webb. If a customer makes a formal complaint, it is handled under the Internal Dispute Resolution process and the customer must receive a written response within 30 days.
+
+
+8. CLOSING THE CASE
+
+Notify the customer of the outcome within 2 business days of the decision. If the dispute is decided against the customer, give the customer 5 business days notice before reversing the provisional credit. Record the outcome and the reason in CaseDesk before closing the case.
+
+
+9. RECORD KEEPING
+
+Keep all dispute records, including evidence and correspondence, for 7 years in line with the KYC and AML/CTF Policy. Do not store customer evidence in personal email or on local drives.

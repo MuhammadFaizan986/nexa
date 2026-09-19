@@ -1,0 +1,55 @@
+LUMEN LABS - NEW STARTER ONBOARDING SOP
+
+Synthetic demo document — fictional company, not real data.
+
+Standard operating procedure SOP-HR-007, version 2.0. Owner: People team. Effective 1 February 2026. This SOP describes the steps the People team, IT and the hiring manager follow to onboard a new employee.
+
+
+1. BEFORE THE START DATE
+
+The People team sends the employment contract through PeopleHub. Onboarding starts only after the signed contract is received.
+
+The hiring manager raises an IT onboarding ticket at least 10 business days before the start date, listing the role, team and systems the new starter needs.
+
+IT ships the laptop so that it arrives at least 3 business days before the start date. Laptops are shipped with full-disk encryption already enabled.
+
+The hiring manager chooses an onboarding buddy from the same team and tells the buddy at least 1 week before the start date.
+
+
+2. DAY ONE
+
+The new starter is welcomed at 9:30 am, either at reception at the Port Ellison office or on a video call for remote starters.
+
+IT runs a 45-minute security induction covering Keyvault, the Lumen Connect VPN and multi-factor authentication. By the end of day one the new starter must have set up MFA with the Lumen Authenticator app.
+
+The buddy takes the new starter to lunch, paid by Lumen Labs up to $40 per person.
+
+
+3. FIRST WEEK
+
+The new starter completes the mandatory training modules in PeopleHub within the first 5 business days: Security Awareness, Code of Conduct, and Privacy and Data Handling.
+
+The new starter confirms in PeopleHub that they have read the Employee Handbook. The handbook requires this within 14 days of starting, but we ask for it in the first week.
+
+The hiring manager and the new starter agree on goals for the first 90 days and record them in PeopleHub.
+
+
+4. FIRST 30 DAYS
+
+The hiring manager holds a 30-day check-in to review progress against the 90-day goals and to ask for feedback on the onboarding experience.
+
+The People team sends a short onboarding survey on day 30. Survey results are anonymous and reviewed monthly.
+
+
+5. 90 DAYS AND PROBATION
+
+The hiring manager holds a 90-day review against the agreed goals.
+
+Probation lasts 6 months. The hiring manager must complete the probation review form in PeopleHub at least 2 weeks before the probation end date and confirm, extend or end the probation. Probation can be extended once, by up to 3 months.
+
+
+6. CONTACTS
+
+People team: people@lumenlabs.example
+IT Service Desk: it@lumenlabs.example
+Security incidents: security@lumenlabs.example

@@ -1,0 +1,75 @@
+[project]
+name = "nexa-backend"
+version = "0.1.0"
+description = "NEXA: multi-tenant AI knowledge base platform (RAG) — backend API"
+readme = "../README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # --- Web API ---
+    "fastapi>=0.141,<1",
+    "uvicorn[standard]>=0.53",
+    "python-multipart>=0.0.32",      # multipart/form-data parsing for file uploads
+    "pydantic[email]>=2.13",         # [email] adds EmailStr validation
+    "pydantic-settings>=2.15",       # typed settings loaded from env vars / .env
+
+    # --- Database ---
+    # psycopg 3 is one driver that supports BOTH async (FastAPI) and sync
+    # (Alembic now, Celery workers in Week 4) with the same URL scheme.
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+    "alembic>=1.20",
+    "psycopg[binary,pool]>=3.3",
+    "pgvector>=0.5",                 # SQLAlchemy `Vector` column type
+
+    # --- Auth ---
+    "pyjwt>=2.14",
+    "argon2-cffi>=25.1",             # Argon2id password hashing (OWASP's first choice)
+
+    # --- Observability ---
+    "structlog>=26.1",
+
+    # --- Document parsing + chunking ---
+    "pymupdf>=1.28",                 # PDF text extraction with font sizes + page numbers
+    "python-docx>=1.2",
+    "tiktoken>=0.14",                # token counting (same tokenizer as text-embedding-3-*)
+
+    # --- AI providers ---
+    "openai>=3.16,<4",               # embeddings (+ optional chat)
+    "google-genai>=2.24,<3",         # Gemini embeddings (free tier available)
+    "anthropic>=1.7,<2",             # Claude for answer generation
+
+    # --- HTTP client (used by scripts/ and the test client) ---
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.16",
+]
+
+[tool.uv]
+# This is an application, not a library we publish: uv only installs deps.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# One event loop for the whole test session. The SQLAlchemy async engine keeps
+# pooled connections that belong to the loop that created them, so every test
+# must run on the same loop.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+markers = [
+    "integration: needs the Postgres database from docker compose",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+ignore = [
+    "B008",  # FastAPI's Depends()/File() in argument defaults is the intended pattern
+]
