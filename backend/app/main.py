@@ -9,8 +9,9 @@ Interactive API docs (generated from the code by FastAPI): /docs
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import access, auth, chat, collections, documents, health, search
+from app.api.v1 import access, admin, auth, chat, collections, documents, health, search
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
@@ -46,9 +47,19 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_middleware(RequestContextMiddleware)
+    # The web UI (Week 5) runs on another origin and needs to read the streaming
+    # response and our own headers.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
+    )
 
     api = APIRouter(prefix=API_PREFIX)
-    for module in (health, auth, access, collections, documents, search, chat):
+    for module in (health, auth, access, admin, collections, documents, search, chat):
         api.include_router(module.router)
     app.include_router(api)
     return app

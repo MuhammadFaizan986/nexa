@@ -25,3 +25,8 @@ backend/eval/.cache/
 
 # Private business plan (pricing, proposal templates) — kept out of the public repo
 NEXA_Project_Plan.md
+
+# Frontend
+node_modules/
+.next/
+next-env.d.ts

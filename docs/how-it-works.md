@@ -29,7 +29,7 @@ Retrieval-Augmented Generation.
 
 ```mermaid
 flowchart TB
-    User["👤 User<br/>(browser, curl, API client)"]
+    User["👤 User<br/>(web UI, curl, API client)"]
 
     subgraph NEXA["NEXA (your servers)"]
         API["FastAPI<br/>auth · permissions · endpoints"]
@@ -269,7 +269,7 @@ erDiagram
 | 2 | Semantic search, streaming chat, verified citations, usage and cost tracking | ✅ |
 | 3 | Keyword + hybrid search, identifier boost, Cohere reranking, contextual headers, metadata filters, the evaluation harness | ✅ |
 | 4 | Groups and per-collection permissions, Row-Level Security, background ingestion (Celery), HTML/CSV, delete and re-index endpoints | ✅ |
-| 5 | Web interface (Next.js) | planned |
+| 5 | Web interface (Next.js): upload, chat with citations, admin dashboard | ✅ |
 | 6 | Follow-up question rewriting, agent tools (summarise, compare, extract), answer-quality eval | planned |
 | 7 | Rate limits, caching, prompt-injection tests, CI, benchmarks at 1k and 10k documents | planned |
 | 8 | Deployment, demo tenants, launch | planned |

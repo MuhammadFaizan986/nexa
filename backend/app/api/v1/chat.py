@@ -82,6 +82,9 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
         history=history,
         collection_ids=collection_ids,
         filters=body.to_filters(),
+        assistant_name=tenant.settings.get("assistant_name"),
+        tone=tenant.settings.get("tone"),
+        model=tenant.settings.get("model"),
     )
     return StreamingResponse(
         stream_answer(turn),

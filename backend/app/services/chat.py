@@ -73,6 +73,11 @@ class ChatTurn:
     history: list[dict]
     collection_ids: list[uuid.UUID]
     filters: SearchFilters | None = None
+    # Per-tenant settings (Week 5): how the assistant is named, how it should
+    # sound, and which model answers.
+    assistant_name: str | None = None
+    tone: str | None = None
+    model: str | None = None
 
 
 def sse(event: str, data: dict) -> str:
@@ -129,9 +134,10 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                 ]
                 t = time.perf_counter()
                 async for event in llm.stream(
-                    system=build_system_prompt(turn.tenant_name),
+                    system=build_system_prompt(turn.tenant_name, turn.assistant_name, turn.tone),
                     messages=messages,
                     max_tokens=settings.llm_max_tokens,
+                    model=turn.model,
                 ):
                     if isinstance(event, TextDelta):
                         if not answer_parts:

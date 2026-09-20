@@ -46,9 +46,12 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def stream(
-        self, *, system: str, messages: list[dict], max_tokens: int
+        self, *, system: str, messages: list[dict], max_tokens: int, model: str | None = None
     ) -> AsyncIterator[StreamEvent]:
-        """Yield TextDelta events as text is generated, then exactly one StreamEnd."""
+        """
+        Yield TextDelta events as text is generated, then exactly one StreamEnd.
+        `model` overrides the configured one (tenants can pick their own).
+        """
 
 
 class AnthropicProvider(LLMProvider):
@@ -79,10 +82,10 @@ class AnthropicProvider(LLMProvider):
         self._client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=3, timeout=120.0)
 
     async def stream(
-        self, *, system: str, messages: list[dict], max_tokens: int
+        self, *, system: str, messages: list[dict], max_tokens: int, model: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         kwargs: dict = {
-            "model": self.model,
+            "model": model or self.model,
             "max_tokens": max_tokens,
             "system": system,
             "messages": messages,
@@ -116,19 +119,19 @@ class OpenAIProvider(LLMProvider):
         self._client = AsyncOpenAI(api_key=api_key, max_retries=3, timeout=120.0)
 
     async def stream(
-        self, *, system: str, messages: list[dict], max_tokens: int
+        self, *, system: str, messages: list[dict], max_tokens: int, model: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         response = await self._client.chat.completions.create(
-            model=self.model,
+            model=model or self.model,
             messages=[{"role": "system", "content": system}, *messages],
             max_completion_tokens=max_tokens,
             stream=True,
             # Ask for a final chunk containing token usage (off by default when streaming).
             stream_options={"include_usage": True},
         )
-        model, finish_reason, usage = self.model, None, None
+        served_model, finish_reason, usage = model or self.model, None, None
         async for chunk in response:
-            model = chunk.model or model
+            served_model = chunk.model or served_model
             if chunk.usage is not None:
                 usage = chunk.usage
             for choice in chunk.choices:
@@ -137,7 +140,7 @@ class OpenAIProvider(LLMProvider):
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
         yield StreamEnd(
-            model=model,
+            model=served_model,
             input_tokens=usage.prompt_tokens if usage else 0,
             output_tokens=usage.completion_tokens if usage else 0,
             stop_reason=finish_reason,
@@ -157,7 +160,7 @@ class FakeLLMProvider(LLMProvider):
     _QUESTION = re.compile(r"Question: (.+)$", re.DOTALL)
 
     async def stream(
-        self, *, system: str, messages: list[dict], max_tokens: int
+        self, *, system: str, messages: list[dict], max_tokens: int, model: str | None = None
     ) -> AsyncIterator[StreamEvent]:
         from app.services.generation.citations import best_matching_sentence
 

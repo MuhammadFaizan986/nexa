@@ -4,7 +4,7 @@ This page follows a document and then a question through the code, file by
 file, in the order the code runs. Each module's docstring explains why its
 technique exists.
 
-Status: **Weeks 0–4 complete**: hybrid retrieval with reranking, contextual
+Status: **Weeks 0–5 complete**: hybrid retrieval with reranking, contextual
 chunk headers, metadata filters, a retrieval eval
 ([results](evaluation-results.md)), group permissions with Row-Level Security,
 and background ingestion.
@@ -92,6 +92,19 @@ question ─▶ permission scope ─▶ embed ─▶ semantic (40) + keyword (40
 
 ---
 
+## 3b. The web UI (`frontend/`)
+
+| Piece | File | What it does |
+|---|---|---|
+| API client | `frontend/src/lib/api.ts` | The only place that calls the API: tokens, automatic refresh on 401, and the SSE reader that turns the chat stream into tokens |
+| Session | `frontend/src/lib/auth.tsx` | Who is signed in; guards every page under `(app)/` |
+| Ask | `frontend/src/app/(app)/chat/page.tsx` | Conversations, streamed answers, source chips, thumbs up/down |
+| Sources | `frontend/src/components/CitationPanel.tsx` | The quoted sentence, its page/section, and a link to the original file |
+| Documents | `frontend/src/app/(app)/documents/page.tsx` | Drag-and-drop upload; polls only while the worker is busy |
+| Admin | `frontend/src/app/(app)/admin/page.tsx` | Cost per day, people, groups, collection grants, assistant settings |
+
+---
+
 ## 4. Data model
 
 ```
@@ -116,6 +129,7 @@ models.
 | Postgres keyword ranking has no IDF (rare words aren't weighted up) | Mitigated by the identifier boost; a BM25 extension (e.g. ParadeDB) is an option at scale |
 | Follow-up questions ("and for Unit 7A?") are searched as-is | Week 6: query rewriting |
 | ~~Ingestion runs inside the upload request~~ | ✅ Week 4: Celery worker + `ingestion_jobs` |
-| No web interface yet (API and scripts only) | Week 5: Next.js UI |
+| ~~No web interface~~ | ✅ Week 5: Next.js UI (`frontend/`) |
+| The UI keeps tokens in localStorage (readable by any script on the page) | Week 7: move to httpOnly cookies |
 | ~~Restricted collections are admin-only; no groups; no RLS~~ | ✅ Week 4: groups, per-collection grants, Row-Level Security |
 | Similarity can't separate answerable from unanswerable questions | Gate on the reranker score; tune `MIN_RERANK_SCORE` from `make eval` |

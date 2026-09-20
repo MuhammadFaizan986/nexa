@@ -76,6 +76,22 @@ services:
       redis:
         condition: service_started
 
+  # Web UI (Next.js). Runs on 3001 by default so it can sit next to other
+  # projects that already use 3000.
+  web:
+    build: ./frontend
+    environment:
+      # The browser calls the API directly, so this is the address as seen from
+      # YOUR machine, not from inside the compose network.
+      NEXT_PUBLIC_API_URL: http://localhost:${NEXA_API_PORT:-8010}/api/v1
+    ports:
+      - "${NEXA_WEB_PORT:-3001}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules   # keep the container's installed packages
+    depends_on:
+      - api
+
 volumes:
   pgdata:
   uploads:

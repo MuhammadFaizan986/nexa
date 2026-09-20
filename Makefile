@@ -2,13 +2,14 @@
 COMPOSE = docker compose
 API = $(COMPOSE) exec api
 
-.PHONY: help up down logs worker-logs test test-unit lint format seed ask reindex eval psql migrate shell
+.PHONY: help up down logs worker-logs web-logs test test-unit lint format seed ask reindex eval psql migrate shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
 
 up:  ## Build and start Postgres, Redis and the API (http://localhost:8010/docs)
 	$(COMPOSE) up -d --build
+	@echo "Web UI:   http://localhost:$${NEXA_WEB_PORT:-3001}"
 	@echo "API docs: http://localhost:$${NEXA_API_PORT:-8010}/docs"
 
 down:  ## Stop everything (data is kept in Docker volumes)
@@ -19,6 +20,9 @@ logs:  ## Follow the API logs
 
 worker-logs:  ## Follow the background worker's logs
 	$(COMPOSE) logs -f worker
+
+web-logs:  ## Follow the web UI's logs
+	$(COMPOSE) logs -f web
 
 test:  ## Run all tests (unit + integration + security) against a separate test DB
 	$(COMPOSE) run --rm api pytest

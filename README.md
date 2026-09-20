@@ -10,14 +10,15 @@ pgvector, OpenAI or Gemini embeddings, and Anthropic Claude, following an
 Row-Level Security and background jobs (Week 4), a web UI (Week 5), agentic
 RAG (Week 6), hardening and benchmarks (Week 7), and deployment (Week 8).
 
-**Status: Weeks 0–4 complete.** The product has an ingestion pipeline,
+**Status: Weeks 0–5 complete.** The product has an ingestion pipeline,
 streaming chat with page-accurate citations, and hybrid retrieval (semantic +
 keyword + identifier boost, fused with RRF). It also has Cohere reranking,
 contextual chunk headers, metadata filters and a measured evaluation. On the
 50-question eval, hybrid + reranking finds the answer first 92% of the time and
 in the top 5 98% of the time: see
 [docs/evaluation-results.md](docs/evaluation-results.md). Week 4 added group
-permissions, PostgreSQL Row-Level Security and background ingestion.
+permissions, PostgreSQL Row-Level Security and background ingestion; Week 5
+added the web interface.
 
 ---
 
@@ -27,7 +28,7 @@ Requirements: Docker. Nothing else needs to be installed locally.
 
 ```bash
 cp .env.example .env          # then set your API keys (see "Which API keys?" below)
-make up                       # Postgres (pgvector), Redis, API on http://localhost:8010
+make up                       # Postgres (pgvector), Redis, API, worker and the web UI
 make seed                     # 3 demo tenants + 16 synthetic documents from sample_data/
 make ask Q="What is the notice period for terminating the lease for Unit 4B?"
 make ask TENANT=fintech Q="What does error code E-204 mean?"
@@ -35,8 +36,13 @@ make ask TENANT=company Q="How many days of annual leave do I get after 3 years?
 make eval                     # measure retrieval quality on the 50-question eval set
 ```
 
+**Web UI:** <http://localhost:3001> — sign in with a demo account, e.g. handle
+`harbourview-property-group`, `owner@harbourview.example.com` /
+`nexa-demo-password`.
+
 Interactive API docs: <http://localhost:8010/docs>. Run `make help` for all
-shortcuts.
+shortcuts. Ports are 3001 (web), 8010 (API), 5433 (Postgres) and 6380 (Redis),
+all changeable in `.env`.
 
 ### Which API keys?
 
@@ -91,7 +97,7 @@ cost and per-stage latency. Pass `conversation_id` to ask a follow-up.
 
 ---
 
-## What's implemented (Weeks 0–4)
+## What's implemented (Weeks 0–5)
 
 - **Ingestion**: PDF (page-accurate, headings found by font size), DOCX
   (heading styles and tables), Markdown, TXT, HTML (navigation stripped) and
@@ -122,11 +128,17 @@ cost and per-stage latency. Pass `conversation_id` to ask a follow-up.
   and **PostgreSQL Row-Level Security** as a database-level safety net.
   Conversation history, per-message token/latency tracking, `usage_events`
   with cost estimates, and structured JSON-ready logs with request ids.
-- **Tests**: 112 tests covering parsers, the cleaner, the chunker, citations,
+- **Web UI** (Next.js + Tailwind): sign in or create an organisation; drag-and-drop
+  upload with live processing status; chat with streamed answers, clickable
+  source chips and a citation panel showing the quoted sentence and a link to
+  the original file; thumbs up/down; an admin dashboard with cost per day,
+  people, groups, collection grants and assistant settings (name, tone, model).
+- **Tests**: 115 tests covering parsers, the cleaner, the chunker, citations,
   every search mode, fusion, reranking, filters, the eval metrics, streaming
-  chat, background jobs, **cross-tenant isolation in every search mode,
-  group permissions, and Row-Level Security** (including a deliberately buggy
-  query that forgets the tenant filter), plus the 50-page PDF page check.
+  chat, background jobs, feedback, usage reporting, tenant settings,
+  **cross-tenant isolation in every search mode, group permissions, and
+  Row-Level Security** (including a deliberately buggy query that forgets the
+  tenant filter), plus the 50-page PDF page check.
 - **Sample data and eval set**: 16 synthetic documents across three domains
   (property, fintech, company) and 50 evaluation questions (10 of them
   unanswerable). See [`sample_data/README.md`](sample_data/README.md) and
@@ -160,6 +172,7 @@ backend/
   migrations/          Alembic migrations (hand-written SQL)
   tests/               unit/, integration/, security/
   eval/                run_eval.py + metrics.py (`make eval`); datasets/ = 50 questions
+frontend/              Next.js web UI (app/ pages, lib/ API client, components/)
 docs/how-it-works.md   plain-language tour + diagrams: the pipeline, the APIs used, the jargon
 docs/architecture.md   code-reading guide: follow a document and a question through the code
 docs/evaluation-results.md   measured retrieval quality and what we learned
@@ -192,6 +205,7 @@ implements.
 | `MIN_RELEVANCE_SCORE` | `0.30` | "I don't know" gate without a reranker (cosine similarity; weak signal, see eval) |
 | `INGESTION_MODE` | `celery` | `celery` = a worker processes uploads; `inline` = process in the request (no worker needed) |
 | `DB_APP_ROLE` | `nexa_app` | Unprivileged role the app switches into per transaction so Row-Level Security applies |
+| `CORS_ORIGINS` | `http://localhost:3001` | Origins allowed to call the API (the web UI) |
 
 ## Security notes
 

@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/*
+ * One small palette, defined once, so every page looks like the same product.
+ * Tailwind v4 is configured in CSS: these custom properties become utilities
+ * such as `bg-surface`, `text-muted` and `border-line`.
+ */
+@theme {
+  --color-canvas: #f7f7f8;
+  --color-surface: #ffffff;
+  --color-line: #e4e4e7;
+  --color-ink: #18181b;
+  --color-muted: #6b7280;
+  --color-brand: #2563eb;
+  --color-brand-soft: #eff6ff;
+  /* Chart mark colour, validated against the chart surface for lightness,
+     chroma and contrast (dataviz validator) — light surface #ffffff. */
+  --color-chart: #2563eb;
+  --color-good: #15803d;
+  --color-warn: #b45309;
+  --color-bad: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-canvas: #111113;
+    --color-surface: #18181b;
+    --color-line: #27272a;
+    --color-ink: #f4f4f5;
+    --color-muted: #a1a1aa;
+    --color-brand: #60a5fa;
+    --color-brand-soft: #1e293b;
+    /* Dark mode is stepped separately, not flipped: #60a5fa sits outside the
+       dark lightness band, #3b82f6 passes on surface #18181b. */
+    --color-chart: #3b82f6;
+    --color-good: #4ade80;
+    --color-warn: #fbbf24;
+    --color-bad: #f87171;
+  }
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+/* Answers arrive as Markdown; keep them readable without a plugin. */
+.prose-answer > * + * {
+  margin-top: 0.75rem;
+}
+.prose-answer ul,
+.prose-answer ol {
+  margin-left: 1.25rem;
+  list-style: revert;
+}
+.prose-answer code {
+  background: var(--color-canvas);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+.prose-answer h1,
+.prose-answer h2,
+.prose-answer h3 {
+  font-weight: 600;
+}
+.prose-answer table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.prose-answer th,
+.prose-answer td {
+  border: 1px solid var(--color-line);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}

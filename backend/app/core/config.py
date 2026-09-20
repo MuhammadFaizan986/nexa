@@ -12,10 +12,10 @@ pydantic-settings maps env vars to fields case-insensitively, so the env var
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 INSECURE_DEFAULT_SECRET = "dev-insecure-change-me"
 
@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # refresh token is only ever sent to /auth/refresh.
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 7
+
+    # Browsers refuse cross-origin calls unless the API allows them. The web UI
+    # runs on a different port, so it must be listed here (comma-separated).
+    # NoDecode: read the env var as a plain string (the default would try to
+    # JSON-parse it), then the validator below splits it on commas.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3001"]
 
     # ------------------------------------------------------------------ background jobs
     redis_url: str = "redis://localhost:6380/0"
@@ -142,6 +148,14 @@ class Settings(BaseSettings):
         # `LLM_EFFORT=` in .env arrives as "" — treat blank values as "not set".
         if isinstance(value, str) and value.strip() == "":
             return None
+        return value
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        # Accept "http://a, http://b" from .env as well as a JSON list.
+        if isinstance(value, str) and not value.strip().startswith("["):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
     @field_validator("db_app_role")
