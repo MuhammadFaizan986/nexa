@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from app.core.logging import configure_logging
 from app.db.models import Document, DocumentStatus, Tenant
+from app.db.rls import maintenance_mode, tenant_scope
 from app.db.session import SessionLocal, engine
 from app.services.ingestion.pipeline import ingest_document
 
@@ -29,7 +30,7 @@ from app.services.ingestion.pipeline import ingest_document
 async def reindex(tenant_slug: str | None, status: str | None) -> int:
     configure_logging()
     query = (
-        select(Document.id, Document.filename, Tenant.slug)
+        select(Document.id, Document.tenant_id, Document.filename, Tenant.slug)
         .join(Tenant, Tenant.id == Document.tenant_id)
         .order_by(Tenant.slug, Document.filename)
     )
@@ -37,21 +38,26 @@ async def reindex(tenant_slug: str | None, status: str | None) -> int:
         query = query.where(Tenant.slug == tenant_slug)
     if status:
         query = query.where(Document.status == status)
-    async with SessionLocal() as session:
-        rows = (await session.execute(query)).all()
+    # This tool legitimately works across tenants, so it asks for the admin view
+    # (Row-Level Security would otherwise hide every row — see app/db/rls.py).
+    with maintenance_mode():
+        async with SessionLocal() as session:
+            rows = (await session.execute(query)).all()
 
     print(f"Re-indexing {len(rows)} document(s)...")
     failures = 0
-    for document_id, filename, slug in rows:
+    for document_id, tenant_id, filename, slug in rows:
         # A fresh session per document: one failure can't affect the others.
-        async with SessionLocal() as session:
-            chunks = await ingest_document(session, document_id)
-            document = await session.get(Document, document_id)
-        if document.status == DocumentStatus.READY:
-            print(f"  ready   {slug}/{filename}  ({chunks} chunks)")
-        else:
-            failures += 1
-            print(f"  FAILED  {slug}/{filename}\n          {document.error_message}")
+        # Each document is processed as its own tenant.
+        with tenant_scope(tenant_id), maintenance_mode():
+            async with SessionLocal() as session:
+                chunks = await ingest_document(session, document_id)
+                document = await session.get(Document, document_id)
+            if document.status == DocumentStatus.READY:
+                print(f"  ready   {slug}/{filename}  ({chunks} chunks)")
+            else:
+                failures += 1
+                print(f"  FAILED  {slug}/{filename}\n          {document.error_message}")
     await engine.dispose()
     print(f"Done: {len(rows) - failures} ready, {failures} failed.")
     return 1 if failures else 0

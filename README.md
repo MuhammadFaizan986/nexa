@@ -10,13 +10,14 @@ pgvector, OpenAI or Gemini embeddings, and Anthropic Claude, following an
 Row-Level Security and background jobs (Week 4), a web UI (Week 5), agentic
 RAG (Week 6), hardening and benchmarks (Week 7), and deployment (Week 8).
 
-**Status: Weeks 0–3 complete.** The product has an ingestion pipeline,
+**Status: Weeks 0–4 complete.** The product has an ingestion pipeline,
 streaming chat with page-accurate citations, and hybrid retrieval (semantic +
 keyword + identifier boost, fused with RRF). It also has Cohere reranking,
 contextual chunk headers, metadata filters and a measured evaluation. On the
 50-question eval, hybrid + reranking finds the answer first 92% of the time and
 in the top 5 98% of the time: see
-[docs/evaluation-results.md](docs/evaluation-results.md).
+[docs/evaluation-results.md](docs/evaluation-results.md). Week 4 added group
+permissions, PostgreSQL Row-Level Security and background ingestion.
 
 ---
 
@@ -90,13 +91,16 @@ cost and per-stage latency. Pass `conversation_id` to ask a follow-up.
 
 ---
 
-## What's implemented (Weeks 0–3)
+## What's implemented (Weeks 0–4)
 
 - **Ingestion**: PDF (page-accurate, headings found by font size), DOCX
-  (heading styles and tables), Markdown and TXT. Cleaning removes repeated
-  headers and footers. Structure-aware chunking of ~600 tokens with overlap,
-  where every chunk keeps its page range and section. Embeddings are batched.
-  Uploads are deduplicated by SHA-256, and failed files keep a readable error.
+  (heading styles and tables), Markdown, TXT, HTML (navigation stripped) and
+  CSV (rows become readable lines with their column names). Cleaning removes
+  repeated headers and footers. Structure-aware chunking of ~600 tokens with
+  overlap, where every chunk keeps its page range and section. Uploads are
+  deduplicated by SHA-256, processed by a **background worker** (Celery +
+  Redis) so requests return immediately, and every attempt is recorded, so a
+  failed document shows why and can be re-indexed.
 - **Retrieval**: runs semantic search (pgvector HNSW) and keyword search
   (Postgres full-text), plus a boost for identifiers like `WO-6612`, and fuses
   them with Reciprocal Rank Fusion. A reranker (Cohere) then re-scores the top
@@ -114,13 +118,15 @@ cost and per-stage latency. Pass `conversation_id` to ask a follow-up.
   returns "I don't have enough information…" without calling the LLM, and
   document text is treated as data, never as instructions.
 - **Platform**: multi-tenant data model, JWT auth (access + refresh), roles
-  (owner/admin/member/viewer) and deny-by-default collection permissions.
+  (owner/admin/member/viewer), **groups with per-collection read/write grants**
+  and **PostgreSQL Row-Level Security** as a database-level safety net.
   Conversation history, per-message token/latency tracking, `usage_events`
   with cost estimates, and structured JSON-ready logs with request ids.
-- **Tests**: 98 tests covering parsers, the cleaner, the chunker, citations,
+- **Tests**: 112 tests covering parsers, the cleaner, the chunker, citations,
   every search mode, fusion, reranking, filters, the eval metrics, streaming
-  chat, **cross-tenant isolation in every search mode, restricted-collection
-  leakage**, and the 50-page PDF page-number check.
+  chat, background jobs, **cross-tenant isolation in every search mode,
+  group permissions, and Row-Level Security** (including a deliberately buggy
+  query that forgets the tenant filter), plus the 50-page PDF page check.
 - **Sample data and eval set**: 16 synthetic documents across three domains
   (property, fintech, company) and 50 evaluation questions (10 of them
   unanswerable). See [`sample_data/README.md`](sample_data/README.md) and
@@ -144,24 +150,29 @@ backend/
     db/models/         SQLAlchemy models (tenants, documents, chunks, chat, usage)
     schemas/           Pydantic request/response models
     services/
-      ingestion/       parsers/ -> cleaner -> chunker -> pipeline
+      ingestion/       parsers/ -> cleaner -> chunker -> pipeline -> jobs
       embeddings/      OpenAI, Gemini + offline fake provider
       retrieval/       permissions, semantic, keyword, hybrid (RRF), reranker, retriever
       generation/      LLM providers, prompts, citations
       chat.py          the streaming question-answering pipeline
       usage.py         token + cost tracking
+    workers/           Celery app + background ingestion task
   migrations/          Alembic migrations (hand-written SQL)
   tests/               unit/, integration/, security/
   eval/                run_eval.py + metrics.py (`make eval`); datasets/ = 50 questions
+docs/how-it-works.md   plain-language tour + diagrams: the pipeline, the APIs used, the jargon
 docs/architecture.md   code-reading guide: follow a document and a question through the code
 docs/evaluation-results.md   measured retrieval quality and what we learned
 sample_data/           synthetic demo documents (+ _source/ and generator)
 scripts/               seed_demo_tenants.py, ask.py, reindex.py, generate_sample_data.py
 ```
 
-**New to the codebase?** Read [`docs/architecture.md`](docs/architecture.md)
-first. It walks through the code in the order a request runs, and every
-module's docstring explains the RAG concept it implements.
+**New here?** Start with [`docs/how-it-works.md`](docs/how-it-works.md): a
+plain-language tour with diagrams of what happens to a document and to a
+question, which third-party APIs are involved and what they cost. Then
+[`docs/architecture.md`](docs/architecture.md) walks through the code in the
+order a request runs, and every module's docstring explains the RAG concept it
+implements.
 
 ## Key settings (`.env`)
 
@@ -179,11 +190,19 @@ module's docstring explains the RAG concept it implements.
 | `RERANK_MAX_PER_MINUTE` | `10` | Client-side pacing for Cohere trial keys; `0` for production keys |
 | `MIN_RERANK_SCORE` | `0.80` | "I don't know" gate when reranking (measured; `make eval` suggests values) |
 | `MIN_RELEVANCE_SCORE` | `0.30` | "I don't know" gate without a reranker (cosine similarity; weak signal, see eval) |
+| `INGESTION_MODE` | `celery` | `celery` = a worker processes uploads; `inline` = process in the request (no worker needed) |
+| `DB_APP_ROLE` | `nexa_app` | Unprivileged role the app switches into per transaction so Row-Level Security applies |
 
 ## Security notes
 
 - The tenant always comes from the authenticated user, never from the request
   body. Permission filters run inside the search SQL, before ranking.
+- **Row-Level Security**: PostgreSQL itself refuses to return another tenant's
+  documents or chunks. Each request switches into an unprivileged role and sets
+  `app.tenant_id`; admin tools (re-index, eval) opt out explicitly. A test
+  proves it by running a query that deliberately forgets the tenant filter.
+- **Group permissions**: access to a restricted collection is granted to a
+  group, and users belong to groups. Read grants don't allow uploading.
 - Unknown or inaccessible documents, collections and conversations return
   `404` (not `403`), so their ids can't be probed.
 - Passwords are hashed with Argon2id. Logins with a wrong password and with an

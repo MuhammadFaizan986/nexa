@@ -1,6 +1,7 @@
 """Upload -> ingestion -> chunks, including the real sample PDFs from sample_data/."""
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.models import Chunk
+from app.db.rls import maintenance_mode
 from app.db.session import SessionLocal
 
 LEASE_MD = b"""# Lease Agreement - Unit 4B
@@ -30,11 +32,14 @@ def sample_data_dir() -> Path | None:
 
 
 async def chunks_of(document_id: str) -> list[Chunk]:
-    async with SessionLocal() as session:
-        rows = await session.scalars(
-            select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.chunk_index)
-        )
-        return list(rows)
+    # Row-Level Security hides rows of other tenants, so a test helper that
+    # queries the database directly has to ask for the admin view explicitly.
+    with maintenance_mode():
+        async with SessionLocal() as session:
+            rows = await session.scalars(
+                select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.chunk_index)
+            )
+            return list(rows)
 
 
 async def test_upload_markdown_creates_searchable_chunks(client, make_tenant):
@@ -210,3 +215,96 @@ async def test_citation_points_at_the_page_of_the_quoted_line(make_tenant):
     )
     snippet = chunk.content[chunk.content.index(line) :].split("\n")[0]
     assert locate_in_chunk(retrieved, snippet)[0] == 2
+
+
+async def test_background_mode_returns_immediately_and_records_a_job(
+    client, make_tenant, monkeypatch
+):
+    """With INGESTION_MODE=celery the upload only queues work; a worker does it."""
+    queued: list[tuple] = []
+
+    class FakeTask:
+        def delay(self, *args):
+            queued.append(args)
+
+    monkeypatch.setattr(get_settings(), "ingestion_mode", "celery")
+    import app.workers.tasks as tasks
+
+    monkeypatch.setattr(tasks, "ingest_document_task", FakeTask())
+
+    tenant = await make_tenant()
+    document = (await tenant.upload("lease.md", LEASE_MD))["document"]
+    assert document["status"] == "pending"  # not processed yet
+    assert len(queued) == 1
+
+    detail = (await client.get(f"/documents/{document['id']}", headers=tenant.headers)).json()
+    assert detail["ingestion"]["status"] == "queued"
+    assert detail["chunk_count"] == 0
+
+    # Now run what the worker would have run.
+    from app.db.rls import tenant_scope
+    from app.services.ingestion.jobs import run_ingestion_job
+
+    job_id, document_id, tenant_id = queued[0]
+    with tenant_scope(uuid.UUID(tenant_id)):
+        async with SessionLocal() as session:
+            chunks = await run_ingestion_job(session, uuid.UUID(job_id))
+    assert chunks > 0
+
+    detail = (await client.get(f"/documents/{document['id']}", headers=tenant.headers)).json()
+    assert detail["status"] == "ready"
+    assert detail["ingestion"]["status"] == "done"
+    assert detail["ingestion"]["attempts"] == 1
+    assert detail["ingestion"]["chunks_created"] == detail["chunk_count"] > 0
+
+
+async def test_reindex_delete_and_download(client, make_tenant, add_user):
+    tenant = await make_tenant()
+    document = (await tenant.upload("lease.md", LEASE_MD))["document"]
+
+    # Re-index: same document id, processed again.
+    response = await client.post(f"/documents/{document['id']}/reindex", headers=tenant.headers)
+    assert response.status_code == 202
+    detail = response.json()
+    assert detail["status"] == "ready" and detail["ingestion"]["attempts"] == 1
+    assert len(await chunks_of(document["id"])) == detail["chunk_count"]
+
+    # Download returns the original bytes.
+    file_response = await client.get(f"/documents/{document['id']}/file", headers=tenant.headers)
+    assert file_response.status_code == 200
+    assert file_response.content == LEASE_MD
+
+    # A viewer may read but not change or delete.
+    viewer = await add_user(tenant, "viewer@example.com", "viewer")
+    assert (
+        await client.get(f"/documents/{document['id']}/file", headers=viewer)
+    ).status_code == 200
+    assert (await client.delete(f"/documents/{document['id']}", headers=viewer)).status_code == 403
+
+    deleted = await client.delete(f"/documents/{document['id']}", headers=tenant.headers)
+    assert deleted.status_code == 204
+    assert (
+        await client.get(f"/documents/{document['id']}", headers=tenant.headers)
+    ).status_code == 404
+    assert await chunks_of(document["id"]) == []  # chunks went with it
+
+
+async def test_csv_and_html_uploads_are_searchable(client, make_tenant):
+    tenant = await make_tenant()
+    rent_roll = b"Unit,Monthly rent,Lease start\n4B,2450,2026-03-01\n7A,3100,2025-11-01\n"
+    wiki = (
+        b"<html><head><title>Refunds</title></head><body>"
+        b"<nav>Home</nav><h1>Refund Policy</h1>"
+        b"<p>Refunds are issued within 5 business days of approval.</p></body></html>"
+    )
+    csv_doc = (await tenant.upload("rent_roll.csv", rent_roll))["document"]
+    html_doc = (await tenant.upload("refunds.html", wiki))["document"]
+    assert (csv_doc["status"], csv_doc["mime_type"]) == ("ready", "text/csv")
+    assert (html_doc["status"], html_doc["title"]) == ("ready", "Refunds")
+
+    hits = (
+        await client.post(
+            "/search", headers=tenant.headers, json={"query": "monthly rent for unit 4B"}
+        )
+    ).json()["results"]
+    assert "Unit: 4B; Monthly rent: 2450" in hits[0]["content"]

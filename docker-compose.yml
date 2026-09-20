@@ -52,6 +52,29 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  # Background worker: parses, chunks and embeds uploaded documents, so upload
+  # requests return immediately. Watch it with: docker compose logs -f worker
+  worker:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://nexa:nexa@db:5432/nexa
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/uploads
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - uploads:/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
 volumes:
   pgdata:

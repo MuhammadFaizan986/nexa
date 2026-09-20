@@ -19,6 +19,7 @@ embedding provider, seeding all 16 documents costs well under one US cent.
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -121,7 +122,27 @@ def seed(client: httpx.Client, domain: str, name: str, email: str) -> bool:
             ok = False
             line += f"\n            {result.get('detail')}"
         print(line)
-    return ok
+    return wait_until_processed(client, headers) and ok
+
+
+def wait_until_processed(client: httpx.Client, headers: dict, timeout: int = 900) -> bool:
+    """
+    With INGESTION_MODE=celery the upload only queues the work, so wait for the
+    worker to finish before declaring the tenant seeded.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        documents = client.get("/documents", headers=headers).json()
+        busy = [d for d in documents if d["status"] in ("pending", "processing")]
+        if not busy:
+            failed = [d for d in documents if d["status"] == "failed"]
+            for document in failed:
+                print(f"  failed    {document['filename']}: {document['error_message']}")
+            return not failed
+        print(f"  ... waiting for the worker: {len(busy)} document(s) still processing")
+        time.sleep(3)
+    print("  timed out waiting for the worker (is `docker compose up worker` running?)")
+    return False
 
 
 def main() -> int:

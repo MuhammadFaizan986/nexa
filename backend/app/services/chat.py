@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models import Message, MessageCitation, MessageRole, UsageEventType
+from app.db.rls import use_tenant
 from app.db.session import SessionLocal
 from app.services.generation.citations import CitationResult, resolve_citations
 from app.services.generation.llm import StreamEnd, TextDelta, get_llm_provider
@@ -92,6 +93,9 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
         {"conversation_id": turn.conversation_id, "user_message_id": turn.user_message_id},
     )
 
+    # This generator keeps running after the HTTP handler has returned, so it
+    # sets the tenant itself for Row-Level Security (app/db/rls.py).
+    use_tenant(turn.tenant_id)
     try:
         async with SessionLocal() as session:
             # 1-2. Retrieve: embed the question, run semantic + keyword search

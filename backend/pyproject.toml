@@ -24,12 +24,16 @@ dependencies = [
     "pyjwt>=2.14",
     "argon2-cffi>=25.1",             # Argon2id password hashing (OWASP's first choice)
 
+    # --- Background jobs ---
+    "celery[redis]>=5.5",            # ingestion runs in a worker, not in the request
+
     # --- Observability ---
     "structlog>=26.1",
 
     # --- Document parsing + chunking ---
     "pymupdf>=1.28",                 # PDF text extraction with font sizes + page numbers
     "python-docx>=1.2",
+    "beautifulsoup4>=4.14",          # HTML parsing (exported wikis, saved web pages)
     "tiktoken>=0.14",                # token counting (same tokenizer as text-embedding-3-*)
 
     # --- AI providers ---

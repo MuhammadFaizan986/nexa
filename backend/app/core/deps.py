@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import TokenError, decode_token
 from app.db.models import User, UserRole
+from app.db.rls import apply_to_session, use_tenant
 from app.db.session import get_session
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -51,8 +52,12 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise _UNAUTHORIZED
 
-    # Every log line for the rest of this request carries these ids.
+    # Every log line for the rest of this request carries these ids...
     structlog.contextvars.bind_contextvars(tenant_id=str(tenant_id), user_id=str(user_id))
+    # ...and every database transaction from here on is limited to this tenant by
+    # Postgres itself (Row-Level Security, see app/db/rls.py).
+    use_tenant(user.tenant_id)
+    await apply_to_session(session)  # the transaction is already open: update it now
     return user
 
 

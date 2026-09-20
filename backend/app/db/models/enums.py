@@ -24,6 +24,18 @@ class CollectionVisibility(StrEnum):
     RESTRICTED = "restricted"
 
 
+class CollectionPermission(StrEnum):
+    READ = "read"  # search and read documents in the collection
+    WRITE = "write"  # ...and upload/edit/delete them
+
+
+class IngestionJobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
 class DocumentStatus(StrEnum):
     PENDING = "pending"  # row created, file stored, not processed yet
     PROCESSING = "processing"  # parse -> chunk -> embed in progress

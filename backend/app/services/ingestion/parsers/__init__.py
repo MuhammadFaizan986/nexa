@@ -1,15 +1,18 @@
 """
 Parser registry: pick a parser by file extension.
 
-To support a new format (HTML and CSV arrive in Week 4), write a function
-`parse_xxx(path) -> ParsedDocument` and add it to PARSERS + MIME_TYPES.
+To support a new format, write a function `parse_xxx(path) -> ParsedDocument`
+and add it to PARSERS + MIME_TYPES. (Scanned PDFs needing OCR, and Excel files,
+are deliberately left for when a client actually needs them.)
 """
 
 from collections.abc import Callable
 from pathlib import Path
 
 from app.services.ingestion.parsers.base import Block, ParsedDocument, ParseError
+from app.services.ingestion.parsers.csv import parse_csv
 from app.services.ingestion.parsers.docx import parse_docx
+from app.services.ingestion.parsers.html import parse_html
 from app.services.ingestion.parsers.pdf import parse_pdf
 from app.services.ingestion.parsers.text import parse_markdown, parse_text
 
@@ -19,6 +22,9 @@ PARSERS: dict[str, Callable[[Path], ParsedDocument]] = {
     ".md": parse_markdown,
     ".markdown": parse_markdown,
     ".txt": parse_text,
+    ".html": parse_html,
+    ".htm": parse_html,
+    ".csv": parse_csv,
 }
 
 # We decide the MIME type from the extension ourselves; the Content-Type header a
@@ -29,6 +35,9 @@ MIME_TYPES: dict[str, str] = {
     ".md": "text/markdown",
     ".markdown": "text/markdown",
     ".txt": "text/plain",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".csv": "text/csv",
 }
 
 SUPPORTED_EXTENSIONS = frozenset(PARSERS)

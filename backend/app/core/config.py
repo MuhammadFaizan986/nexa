@@ -9,6 +9,7 @@ pydantic-settings maps env vars to fields case-insensitively, so the env var
 `CHUNK_SIZE_TOKENS=800` sets `settings.chunk_size_tokens = 800`, validated as an int.
 """
 
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ database
     # `postgresql+psycopg` = SQLAlchemy dialect "postgresql" using the psycopg 3 driver.
     database_url: str = "postgresql+psycopg://nexa:nexa@localhost:5433/nexa"
+    # Unprivileged role the app switches into per transaction so Row-Level
+    # Security applies (superusers and table owners bypass it). Created by
+    # migration 0005. Empty = don't switch (RLS then only guards other roles).
+    db_app_role: str = "nexa_app"
 
     # ------------------------------------------------------------------ auth
     jwt_secret: SecretStr = SecretStr(INSECURE_DEFAULT_SECRET)
@@ -44,6 +49,12 @@ class Settings(BaseSettings):
     # refresh token is only ever sent to /auth/refresh.
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 7
+
+    # ------------------------------------------------------------------ background jobs
+    redis_url: str = "redis://localhost:6380/0"
+    # celery = hand the work to a worker (uploads return immediately).
+    # inline  = process inside the upload request (tests, or running without a worker).
+    ingestion_mode: Literal["celery", "inline"] = "celery"
 
     # ------------------------------------------------------------------ uploads
     storage_dir: Path = Path("./data/uploads")
@@ -131,6 +142,15 @@ class Settings(BaseSettings):
         # `LLM_EFFORT=` in .env arrives as "" — treat blank values as "not set".
         if isinstance(value, str) and value.strip() == "":
             return None
+        return value
+
+    @field_validator("db_app_role")
+    @classmethod
+    def _valid_identifier(cls, value: str) -> str:
+        # This value is interpolated into "SET LOCAL ROLE ..." (identifiers can't
+        # be bind parameters), so it must look like a plain identifier.
+        if value and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError("DB_APP_ROLE must be a plain SQL identifier")
         return value
 
     @model_validator(mode="after")

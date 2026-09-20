@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
-from app.api.v1 import auth, chat, collections, documents, health, search
+from app.api.v1 import access, auth, chat, collections, documents, health, search
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
@@ -42,13 +42,13 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NEXA API",
         description="Multi-tenant AI knowledge base (RAG) with citations and permissions.",
-        version="0.2.0",  # 0.2 = Weeks 0–2 complete
+        version="0.4.0",  # matches the plan's week number
         lifespan=lifespan,
     )
     app.add_middleware(RequestContextMiddleware)
 
     api = APIRouter(prefix=API_PREFIX)
-    for module in (health, auth, collections, documents, search, chat):
+    for module in (health, auth, access, collections, documents, search, chat):
         api.include_router(module.router)
     app.include_router(api)
     return app

@@ -116,3 +116,58 @@ def test_unsupported_extension(tmp_path):
     exe.write_bytes(b"MZ")
     with pytest.raises(ParseError, match="Unsupported"):
         parse_file(exe, "x.exe")
+
+
+def test_html_parser_reads_headings_tables_and_drops_navigation(tmp_path):
+    html = tmp_path / "wiki.html"
+    html.write_text(
+        "<html><head><title>Support Wiki</title></head><body>"
+        "<nav><a href='/'>Home</a><a href='/pricing'>Pricing</a></nav>"
+        "<script>track('page');</script>"
+        "<h1>Refund Policy</h1><p>Refunds are issued within 5 business days.</p>"
+        "<h2>Exceptions</h2><ul><li>Digital goods are non-refundable.</li></ul>"
+        "<table><tr><th>Plan</th><th>Fee</th></tr><tr><td>Premium</td><td>$9</td></tr></table>"
+        "<footer>&copy; Kestrel Pay</footer></body></html>"
+    )
+    parsed = parse_file(html, "wiki.html")
+    texts = [(b.kind, b.text) for b in parsed.blocks]
+
+    assert parsed.title == "Support Wiki"
+    assert ("heading", "Refund Policy") in texts and ("heading", "Exceptions") in texts
+    assert [b.level for b in parsed.blocks if b.kind == "heading"] == [1, 2]
+    assert ("paragraph", "Plan: Premium; Fee: $9") in texts  # table row with column names
+    joined = " ".join(b.text for b in parsed.blocks)
+    assert "Pricing" not in joined and "track(" not in joined and "Kestrel Pay" not in joined
+
+
+def test_html_without_text_fails_clearly(tmp_path):
+    empty = tmp_path / "app.html"
+    empty.write_text("<html><body><script>render()</script></body></html>")
+    with pytest.raises(ParseError, match="No readable text"):
+        parse_file(empty, "app.html")
+
+
+def test_csv_rows_become_readable_lines(tmp_path):
+    csv_file = tmp_path / "rent_roll.csv"
+    csv_file.write_text("Unit,Monthly rent,Lease start\n4B,2450,2026-03-01\n7A,3100,2025-11-01\n\n")
+    parsed = parse_file(csv_file, "rent_roll.csv")
+    texts = [b.text for b in parsed.blocks]
+
+    assert parsed.title == "Rent Roll"
+    assert texts[0] == "Rent Roll" and parsed.blocks[0].kind == "heading"
+    assert "Columns: Unit, Monthly rent, Lease start" in texts
+    assert "Unit: 4B; Monthly rent: 2450; Lease start: 2026-03-01" in texts
+    assert len(texts) == 4  # heading + columns + 2 rows (the blank line is skipped)
+
+
+def test_csv_with_semicolons_and_no_data_rows(tmp_path):
+    semicolons = tmp_path / "fees.csv"
+    semicolons.write_text("Fee;Amount\nCard replacement;10\n")
+    assert "Fee: Card replacement; Amount: 10" in [
+        b.text for b in parse_file(semicolons, "fees.csv").blocks
+    ]
+
+    header_only = tmp_path / "empty.csv"
+    header_only.write_text("Fee,Amount\n")
+    with pytest.raises(ParseError, match="no data rows"):
+        parse_file(header_only, "empty.csv")

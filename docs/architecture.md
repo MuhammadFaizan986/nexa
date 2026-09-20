@@ -4,9 +4,10 @@ This page follows a document and then a question through the code, file by
 file, in the order the code runs. Each module's docstring explains why its
 technique exists.
 
-Status: **Weeks 0–3 complete**: hybrid retrieval with reranking, contextual
-chunk headers, metadata filters and a retrieval eval
-([results](evaluation-results.md)).
+Status: **Weeks 0–4 complete**: hybrid retrieval with reranking, contextual
+chunk headers, metadata filters, a retrieval eval
+([results](evaluation-results.md)), group permissions with Row-Level Security,
+and background ingestion.
 
 ---
 
@@ -17,6 +18,7 @@ chunk headers, metadata filters and a retrieval eval
 | Request id + access log | `backend/app/core/middleware.py` | Assigns `X-Request-ID`, logs method/path/status/duration once per request |
 | Auth | `backend/app/core/deps.py` → `get_current_user` | Verifies the JWT, loads the user **by id AND tenant id**, rejects inactive users |
 | Tenant | (same) | The tenant is always `user.tenant_id`. No endpoint accepts a tenant id from the client |
+| Row-Level Security | `backend/app/db/rls.py` | Sets `app.tenant_id` and switches to an unprivileged role for every transaction, so Postgres itself hides other tenants' rows. Admin tools use `maintenance_mode()` |
 | DB session | `backend/app/db/session.py` | One async SQLAlchemy session per request |
 
 Tokens and password hashing live in `backend/app/core/security.py` (Argon2id,
@@ -27,16 +29,20 @@ short-lived access token + refresh token, algorithm pinned to HS256).
 ## 2. Ingestion: `POST /api/v1/documents`
 
 ```
-upload ─▶ validate ─▶ hash + dedup ─▶ store file ─▶ documents row (pending)
-       ─▶ parse ─▶ clean ─▶ chunk ─▶ embed (batched) ─▶ chunks rows ─▶ status=ready
+API:    upload ─▶ validate ─▶ hash + dedup ─▶ store file ─▶ documents row (pending)
+               ─▶ ingestion_jobs row (queued) ─▶ Redis ─▶ response (immediately)
+Worker: job ─▶ parse ─▶ clean ─▶ chunk ─▶ contextual header ─▶ embed (batched)
+            ─▶ chunks rows ─▶ status=ready (or failed, with the reason)
 ```
 
 | Step | File | Key ideas |
 |---|---|---|
 | Validate + dedup | `backend/app/api/v1/documents.py` | Extension allow-list, size limit while streaming to disk, magic-byte check, SHA-256 dedup per tenant (also enforced by a UNIQUE constraint) |
 | Store original | `backend/app/services/storage.py` | Storage key = `<tenant>/<document id>.<ext>`: never the user's filename |
-| Orchestrate | `backend/app/services/ingestion/pipeline.py` | Runs synchronously for now; Week 4 calls the same function from a Celery worker. Any error → `status=failed` + readable `error_message` |
-| Parse | `backend/app/services/ingestion/parsers/` | Every format becomes the same list of `Block`s (heading / paragraph, with page number). PDF headings come from font size; DOCX from heading styles; MD from `#`; TXT from a cautious heuristic |
+| Queue | `backend/app/services/ingestion/jobs.py` | Creates an `ingestion_jobs` row and hands it to Celery (`INGESTION_MODE=inline` runs it in the request instead). Records attempts, timings and errors |
+| Worker | `backend/app/workers/` | One long-lived event loop per worker process; enters `tenant_scope()` because there's no request to set the tenant |
+| Orchestrate | `backend/app/services/ingestion/pipeline.py` | parse → clean → chunk → embed → store, in one transaction. Any error → `status=failed` + readable `error_message` |
+| Parse | `backend/app/services/ingestion/parsers/` | Every format becomes the same list of `Block`s (heading / paragraph, with page number). PDF headings come from font size; DOCX from heading styles; MD from `#`; HTML from `<h1>`…`<h6>` (navigation stripped); CSV rows become "Column: value" lines; TXT from a cautious heuristic |
 | Clean | `backend/app/services/ingestion/cleaner.py` | Unicode normalisation; removes running headers/footers that repeat at the top/bottom of many pages |
 | Chunk | `backend/app/services/ingestion/chunker.py` | Structure-aware: new section → new chunk; packs whole sentences up to ~600 tokens; 80-token overlap inside long sections; merges tiny sections only into siblings |
 | Embed | `backend/app/services/embeddings/` | OpenAI `text-embedding-3-small` or Gemini `gemini-embedding-001` (free tier; separate document/query task types), batched with retries; or the offline `fake` provider for tests |
@@ -70,7 +76,7 @@ question ─▶ permission scope ─▶ embed ─▶ semantic (40) + keyword (40
 | Step | File | Key ideas |
 |---|---|---|
 | Scope + conversation | `backend/app/api/v1/chat.py` | Resolves readable collections; loads/creates the conversation (must belong to this user); saves the question; returns a `StreamingResponse` |
-| Permissions | `backend/app/services/retrieval/permissions.py` | Deny by default. `tenant_wide` collections for everyone; `restricted` ones only for owners/admins until Week 4 groups. Asking for an unreadable collection → 404 |
+| Permissions | `backend/app/services/retrieval/permissions.py` | Deny by default: `tenant_wide` collections for everyone, `restricted` ones only through a group grant (read or write); admins see all of their tenant. Asking for an unreadable collection → 404 |
 | Pipeline | `backend/app/services/retrieval/retriever.py` | `retrieve()`: the same code serves `/search`, `/chat` and `make eval`; every stage can be switched on/off |
 | Semantic | `backend/app/services/retrieval/semantic.py` | `embedding <=> query` with `WHERE tenant_id = … AND collection_id = ANY(…)` **inside** the query; pgvector iterative scans so filters don't starve the result list |
 | Keyword | `backend/app/services/retrieval/keyword.py` | Postgres full-text (`tsv @@ query`, `ts_rank_cd`); ANDs turned into ORs for natural questions; identifier boost because Postgres ranking has no IDF |
@@ -109,6 +115,7 @@ models.
 | ~~Chunks don't carry their document's context (4B vs 7A leases)~~ | ✅ Week 3: contextual chunk headers (semantic Hit@1 70% → 85%) |
 | Postgres keyword ranking has no IDF (rare words aren't weighted up) | Mitigated by the identifier boost; a BM25 extension (e.g. ParadeDB) is an option at scale |
 | Follow-up questions ("and for Unit 7A?") are searched as-is | Week 6: query rewriting |
-| Ingestion runs inside the upload request | Week 4: Celery background jobs |
-| Restricted collections are admin-only; no groups yet; no RLS | Week 4: groups, collection access, Row-Level Security |
+| ~~Ingestion runs inside the upload request~~ | ✅ Week 4: Celery worker + `ingestion_jobs` |
+| No web interface yet (API and scripts only) | Week 5: Next.js UI |
+| ~~Restricted collections are admin-only; no groups; no RLS~~ | ✅ Week 4: groups, per-collection grants, Row-Level Security |
 | Similarity can't separate answerable from unanswerable questions | Gate on the reranker score; tune `MIN_RERANK_SCORE` from `make eval` |

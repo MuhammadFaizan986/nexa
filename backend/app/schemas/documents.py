@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import CollectionVisibility, DocumentStatus
+from app.db.models import CollectionVisibility, DocumentStatus, IngestionJobStatus
 
 
 class CollectionCreate(BaseModel):
@@ -41,8 +41,23 @@ class DocumentOut(BaseModel):
     created_at: datetime
 
 
+class IngestionJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    status: IngestionJobStatus
+    attempts: int
+    chunks_created: int | None
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
 class DocumentDetail(DocumentOut):
     chunk_count: int
+    # What the background worker did (or is doing) with this document.
+    ingestion: IngestionJobOut | None = None
 
 
 class DocumentUpdate(BaseModel):

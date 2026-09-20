@@ -39,6 +39,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.db.models import Chunk, Collection, Document, EvalResult, EvalRun, Tenant
+from app.db.rls import maintenance_mode, tenant_scope
 from app.db.session import SessionLocal, engine
 from app.services.embeddings import get_embedding_provider
 from app.services.retrieval.reranker import Reranker, RerankHit, RerankResult, get_reranker
@@ -251,18 +252,21 @@ async def run_config(
     run = ConfigRun(name, spec["mode"], spec["rerank"], reranker.model if spec["rerank"] else None)
     for i, q in enumerate(questions, start=1):
         scope = scopes[q.domain]
-        async with SessionLocal() as session:
-            result = await retrieve(
-                session,
-                tenant_id=scope.tenant_id,
-                collection_ids=scope.collection_ids,
-                query=q.question,
-                mode=spec["mode"],
-                rerank=spec["rerank"],
-                top_k=TOP_K,
-                query_vector=vectors.get(q.id),
-                reranker=reranker if spec["rerank"] else None,
-            )
+        # Search as that tenant, exactly as a real request would, so Row-Level
+        # Security is part of what we measure.
+        with tenant_scope(scope.tenant_id):
+            async with SessionLocal() as session:
+                result = await retrieve(
+                    session,
+                    tenant_id=scope.tenant_id,
+                    collection_ids=scope.collection_ids,
+                    query=q.question,
+                    mode=spec["mode"],
+                    rerank=spec["rerank"],
+                    top_k=TOP_K,
+                    query_vector=vectors.get(q.id),
+                    reranker=reranker if spec["rerank"] else None,
+                )
         ranked = [
             RankedChunk(c.filename, c.page_start, c.page_end, c.sections or [])
             for c in result.chunks
@@ -481,8 +485,11 @@ async def main(argv: list[str] | None = None) -> int:
     config_names = args.config or list(CONFIGS)
     questions = load_questions(domains)
 
-    async with SessionLocal() as session:
-        scopes = {d: await load_scope(session, DOMAIN_TENANTS[d]) for d in domains}
+    # Reading every tenant's index at once is an admin job, so it opts out of
+    # Row-Level Security explicitly (app/db/rls.py).
+    with maintenance_mode():
+        async with SessionLocal() as session:
+            scopes = {d: await load_scope(session, DOMAIN_TENANTS[d]) for d in domains}
     missing = [DOMAIN_TENANTS[d] for d, scope in scopes.items() if scope is None]
     if missing:
         print(f"Tenants not found: {missing}. Run `make seed` first.")

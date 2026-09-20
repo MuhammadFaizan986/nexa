@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.db.models.enums import DocumentStatus, sql_in
+from app.db.models.enums import DocumentStatus, IngestionJobStatus, sql_in
 
 # Must equal settings.embedding_dim. A column's vector size is fixed in the schema.
 EMBEDDING_DIM = 1536
@@ -124,3 +124,33 @@ class Chunk(Base):
             persisted=True,
         ),
     )
+
+
+class IngestionJob(Base):
+    """
+    One ingestion attempt for a document (Week 4: processing moved to a
+    background worker). It records what the worker did and why it failed, so
+    "why is my document still pending?" has an answer.
+    """
+
+    __tablename__ = "ingestion_jobs"
+    __table_args__ = (CheckConstraint(f"status IN ({sql_in(IngestionJobStatus)})", name="status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        primary_key=True, default=uuid.uuid4, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(index=True)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(16),
+        default=IngestionJobStatus.QUEUED,
+        server_default=IngestionJobStatus.QUEUED.value,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    chunks_created: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

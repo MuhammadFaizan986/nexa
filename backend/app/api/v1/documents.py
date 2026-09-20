@@ -8,9 +8,10 @@ Upload flow for each file (plan section 5.2):
      (unless its earlier processing FAILED: then processing is retried, so e.g.
      fixing a missing API key and re-uploading just works)
   4. move the file into storage + create the `documents` row (status=pending)
-  5. ingest it (parse -> clean -> chunk -> embed -> store)
-     Weeks 1–3: synchronously, inside this request.
-     Week 4:    enqueued to a Celery worker; the request returns immediately.
+  5. queue an ingestion job (parse -> clean -> chunk -> embed -> store).
+     A Celery worker picks it up, so uploading 100 files returns immediately
+     and each document's progress is visible in its status and job record.
+     With INGESTION_MODE=inline the same work runs inside the request instead.
 
 Each file gets its own result (created / duplicate / retried / rejected), so
 one bad file in a batch doesn't fail the others.
@@ -22,7 +23,8 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -30,9 +32,15 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUser, SessionDep
 from app.core.logging import get_logger
 from app.db.models import Chunk, Collection, Document, DocumentStatus, User
-from app.schemas.documents import DocumentDetail, DocumentOut, DocumentUpdate, UploadResult
+from app.schemas.documents import (
+    DocumentDetail,
+    DocumentOut,
+    DocumentUpdate,
+    IngestionJobOut,
+    UploadResult,
+)
+from app.services.ingestion.jobs import latest_job, queue_ingestion
 from app.services.ingestion.parsers import MIME_TYPES, SUPPORTED_EXTENSIONS
-from app.services.ingestion.pipeline import ingest_document
 from app.services.retrieval.permissions import can_write_collection, readable_collection_ids
 from app.services.storage import get_storage
 
@@ -62,7 +70,7 @@ async def upload_documents(
     readable = await readable_collection_ids(session, user)
     if collection is None or collection.id not in readable:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Collection not found")
-    if not can_write_collection(user, collection):
+    if not await can_write_collection(session, user, collection):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't upload to this collection")
     doc_meta = _parse_metadata(metadata)
 
@@ -103,8 +111,11 @@ async def get_document(
     chunk_count = await session.scalar(
         select(func.count()).select_from(Chunk).where(Chunk.document_id == document.id)
     )
+    job = await latest_job(session, document.id)
     return DocumentDetail(
-        **DocumentOut.model_validate(document).model_dump(), chunk_count=chunk_count or 0
+        **DocumentOut.model_validate(document).model_dump(),
+        chunk_count=chunk_count or 0,
+        ingestion=IngestionJobOut.model_validate(job) if job else None,
     )
 
 
@@ -118,11 +129,7 @@ async def update_document(
     copies in the same transaction. No re-embedding is needed: metadata isn't
     part of what gets embedded.
     """
-    document = await _get_readable_document(session, user, document_id)
-    collection = await session.get(Collection, document.collection_id)
-    if collection is None or not can_write_collection(user, collection):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't edit this document")
-
+    document = await _get_writable_document(session, user, document_id)
     document.meta = body.metadata
     await session.execute(
         text(
@@ -136,7 +143,56 @@ async def update_document(
     return document
 
 
+@router.post("/{document_id}/reindex", response_model=DocumentDetail, status_code=202)
+async def reindex_document(
+    document_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> DocumentDetail:
+    """
+    Process this document again: after a failure, or after changing the
+    chunker/embedding model. The stored original file is re-used, so nothing
+    needs uploading again.
+    """
+    document = await _get_writable_document(session, user, document_id)
+    await queue_ingestion(session, document)
+    await session.refresh(document)
+    return await get_document(document_id, user, session)
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_document(
+    document_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> Response:
+    """Delete the document, its chunks (cascade) and the stored original file."""
+    document = await _get_writable_document(session, user, document_id)
+    storage_path = document.storage_path
+    await session.delete(document)
+    await session.commit()
+    get_storage().delete(storage_path)
+    log.info("document.deleted", document_id=str(document_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{document_id}/file")
+async def download_document(
+    document_id: uuid.UUID, user: CurrentUser, session: SessionDep
+) -> FileResponse:
+    """The original file, for 'open the source' links next to a citation."""
+    document = await _get_readable_document(session, user, document_id)
+    path = get_storage().path(document.storage_path)
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File is no longer stored")
+    return FileResponse(path, media_type=document.mime_type, filename=document.filename)
+
+
 # ----------------------------------------------------------------------------- helpers
+
+
+async def _get_writable_document(session, user: User, document_id: uuid.UUID) -> Document:
+    document = await _get_readable_document(session, user, document_id)
+    collection = await session.get(Collection, document.collection_id)
+    if collection is None or not await can_write_collection(session, user, collection):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can't change this document")
+    return document
 
 
 async def _get_readable_document(session, user: User, document_id: uuid.UUID) -> Document:
@@ -227,7 +283,7 @@ async def _upload_one(
         return await _handle_duplicate(session, user, filename, existing)
 
     log.info("document.uploaded", document_id=str(document_id), bytes=size, type=extension)
-    await ingest_document(session, document_id)
+    await queue_ingestion(session, document)
     await session.refresh(document)
     return UploadResult(
         filename=filename, status="created", document=DocumentOut.model_validate(document)
@@ -283,9 +339,9 @@ async def _handle_duplicate(
         # still in storage, so we simply run the pipeline again (e.g. after an
         # API key was added or a parser bug was fixed).
         collection = await session.get(Collection, existing.collection_id)
-        if collection is not None and can_write_collection(user, collection):
+        if collection is not None and await can_write_collection(session, user, collection):
             log.info("document.retry", document_id=str(existing.id))
-            await ingest_document(session, existing.id)
+            await queue_ingestion(session, existing)
             await session.refresh(existing)
             return UploadResult(
                 filename=filename,

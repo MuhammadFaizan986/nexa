@@ -6,6 +6,7 @@ contextual chunk headers, metadata filters and editing metadata.
 from sqlalchemy import select
 
 from app.db.models import Chunk
+from app.db.rls import maintenance_mode
 from app.db.session import SessionLocal
 from tests.helpers import parse_sse
 
@@ -74,12 +75,13 @@ async def test_contextual_header_lets_keyword_search_find_the_right_lease(client
     lease_4b = (await tenant.upload("lease_4b.md", lease("4B")))["document"]
     await tenant.upload("lease_7a.md", lease("7A"))
 
-    async with SessionLocal() as session:
-        headers = list(
-            await session.scalars(
-                select(Chunk.context_header).where(Chunk.document_id == lease_4b["id"])
+    with maintenance_mode():  # RLS: direct queries need the admin view
+        async with SessionLocal() as session:
+            headers = list(
+                await session.scalars(
+                    select(Chunk.context_header).where(Chunk.document_id == lease_4b["id"])
+                )
             )
-        )
     assert "Document: Lease Agreement - Unit 4B | Section: Termination" in headers
 
     body = await search(

@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
+from app.db import rls  # noqa: F401  (registers the Row-Level Security listener)
 
 engine = create_async_engine(
     get_settings().database_url,

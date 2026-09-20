@@ -2,7 +2,7 @@
 COMPOSE = docker compose
 API = $(COMPOSE) exec api
 
-.PHONY: help up down logs test test-unit lint format seed ask reindex eval psql migrate shell
+.PHONY: help up down logs worker-logs test test-unit lint format seed ask reindex eval psql migrate shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -16,6 +16,9 @@ down:  ## Stop everything (data is kept in Docker volumes)
 
 logs:  ## Follow the API logs
 	$(COMPOSE) logs -f api
+
+worker-logs:  ## Follow the background worker's logs
+	$(COMPOSE) logs -f worker
 
 test:  ## Run all tests (unit + integration + security) against a separate test DB
 	$(COMPOSE) run --rm api pytest

@@ -37,6 +37,8 @@ os.environ.update(
         "MIN_RELEVANCE_SCORE": "0.15",
         # Offline word-overlap reranker; its score = share of the question's words
         # found in the passage, so 0.2 means "at least a fifth of them".
+        # Process uploads inside the request: the test suite needs no worker.
+        "INGESTION_MODE": "inline",
         "RERANKER_PROVIDER": "fake",
         "MIN_RERANK_SCORE": "0.2",
     }
@@ -99,7 +101,9 @@ async def clean_db(database: str) -> AsyncIterator[None]:
     from app.db.session import engine
 
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE tenants, usage_events RESTART IDENTITY CASCADE"))
+        await conn.execute(
+            text("TRUNCATE tenants, usage_events, eval_runs RESTART IDENTITY CASCADE")
+        )
     yield
 
 
