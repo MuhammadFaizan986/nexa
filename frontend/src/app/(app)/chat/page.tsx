@@ -5,20 +5,34 @@
  *
  * Three columns: past conversations, the thread, and (when you click a source)
  * the citation panel. The answer streams in token by token, exactly as the API
- * sends it, so the user sees progress within a second instead of staring at a
- * spinner for five.
+ * sends it, so there's something to read within a second instead of a spinner.
  */
 
+import {
+  MessageSquarePlus,
+  Search,
+  SendHorizonal,
+  Sparkles,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { CitationPanel } from "@/components/CitationPanel";
+import { LogoMark } from "@/components/brand";
+import { Button, Empty, ErrorNote, useToast } from "@/components/ui";
 import { ApiError, request, streamChat } from "@/lib/api";
 import type { ChatMessage, Citation, Conversation, ConversationDetail } from "@/lib/types";
-import { CitationPanel } from "@/components/CitationPanel";
-import { Button, Empty, ErrorNote } from "@/components/ui";
 
-type Draft = { question: string; answer: string; done: boolean };
+const SUGGESTIONS = [
+  "What is the notice period for terminating the lease for Unit 4B?",
+  "What does error code E-204 mean?",
+  "How many days of annual leave do I get after 3 years?",
+];
+
+type Draft = { question: string; answer: string };
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -30,6 +44,8 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [citation, setCitation] = useState<Citation | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const notify = useToast();
 
   const loadConversations = useCallback(async () => {
     setConversations(await request<Conversation[]>("/conversations"));
@@ -51,15 +67,12 @@ export default function ChatPage() {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, draft]);
 
-  async function ask(event: React.FormEvent) {
-    event.preventDefault();
-    const asked = question.trim();
-    if (!asked || busy) return;
-
+  async function ask(asked: string) {
+    if (!asked.trim() || busy) return;
     setQuestion("");
     setError(null);
     setBusy(true);
-    setDraft({ question: asked, answer: "", done: false });
+    setDraft({ question: asked, answer: "" });
 
     let newConversationId = conversationId;
     await streamChat(
@@ -91,9 +104,18 @@ export default function ChatPage() {
     );
     try {
       await request(`/messages/${message.id}/feedback`, { method: "POST", body: { value: next } });
+      if (next !== 0) notify(next === 1 ? "Thanks — marked as helpful" : "Thanks — we'll look at it");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save your feedback");
     }
+  }
+
+  function startNew() {
+    setConversationId(null);
+    setMessages([]);
+    setDraft(null);
+    setCitation(null);
+    input.current?.focus();
   }
 
   return (
@@ -101,25 +123,19 @@ export default function ChatPage() {
       {/* Past conversations */}
       <div className="flex w-60 shrink-0 flex-col border-r border-line bg-surface">
         <div className="p-3">
-          <Button
-            className="w-full"
-            onClick={() => {
-              setConversationId(null);
-              setMessages([]);
-              setDraft(null);
-              setCitation(null);
-            }}
-          >
+          <Button icon={MessageSquarePlus} className="w-full" onClick={startNew}>
             New question
           </Button>
         </div>
-        <ul className="flex-1 overflow-y-auto px-2 pb-3">
+        <ul className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
           {conversations.map((conversation) => (
             <li key={conversation.id}>
               <button
                 onClick={() => void openConversation(conversation.id)}
-                className={`mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-sm ${
-                  conversation.id === conversationId ? "bg-brand-soft text-brand" : "hover:bg-canvas"
+                className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm transition ${
+                  conversation.id === conversationId
+                    ? "bg-brand-soft font-medium text-brand"
+                    : "text-muted hover:bg-canvas hover:text-ink"
                 }`}
                 title={conversation.title ?? "Conversation"}
               >
@@ -132,11 +148,24 @@ export default function ChatPage() {
 
       {/* The thread */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
+        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-8">
           {messages.length === 0 && !draft && (
-            <Empty>
-              Ask anything about your documents. Every answer shows the sources it used.
-            </Empty>
+            <div className="mx-auto max-w-2xl">
+              <Empty icon={Sparkles} title="Ask anything about your documents">
+                Every answer shows the passages it used — document, page and the exact sentence.
+              </Empty>
+              <div className="stagger mt-2 grid gap-2">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => void ask(suggestion)}
+                    className="rounded-lg border border-line bg-surface px-4 py-2.5 text-left text-sm transition hover:-translate-y-0.5 hover:border-brand hover:shadow-soft"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {messages.map((message) =>
@@ -146,6 +175,7 @@ export default function ChatPage() {
               <Answer
                 key={message.id}
                 message={message}
+                activeCitation={citation}
                 onCitation={setCitation}
                 onRate={(value) => void rate(message, value)}
               />
@@ -155,9 +185,20 @@ export default function ChatPage() {
           {draft && (
             <>
               <Question text={draft.question} />
-              <div className="max-w-3xl">
-                <div className="prose-answer text-sm leading-relaxed">
-                  {draft.answer || <span className="text-muted">Searching your documents…</span>}
+              <div className="mx-auto flex max-w-3xl gap-3">
+                <LogoMark size={26} className="mt-0.5 shrink-0" />
+                <div className="prose-answer min-w-0 text-sm leading-relaxed">
+                  {draft.answer ? (
+                    <p>
+                      {draft.answer}
+                      <span className="caret" />
+                    </p>
+                  ) : (
+                    <span className="flex items-center gap-2 text-muted">
+                      <Search size={14} className="animate-pulse-soft" />
+                      Searching your documents…
+                    </span>
+                  )}
                 </div>
               </div>
             </>
@@ -165,18 +206,39 @@ export default function ChatPage() {
           <div ref={bottom} />
         </div>
 
-        <form onSubmit={ask} className="border-t border-line bg-surface p-4">
-          <ErrorNote>{error}</ErrorNote>
-          <div className="mt-2 flex gap-2">
-            <input
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="What is the notice period for terminating the lease for Unit 4B?"
-              className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
-            />
-            <Button type="submit" disabled={busy || !question.trim()}>
-              {busy ? "Answering…" : "Ask"}
-            </Button>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void ask(question);
+          }}
+          className="border-t border-line bg-surface/80 p-4 backdrop-blur"
+        >
+          <div className="mx-auto max-w-3xl">
+            <ErrorNote>{error}</ErrorNote>
+            <div className="mt-2 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 shadow-soft transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <textarea
+                ref={input}
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(event) => {
+                  // Enter sends, Shift+Enter makes a new line.
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void ask(question);
+                  }
+                }}
+                rows={1}
+                placeholder="Ask a question about your documents…"
+                className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted"
+              />
+              <Button type="submit" loading={busy} disabled={!question.trim()} icon={SendHorizonal}>
+                Ask
+              </Button>
+            </div>
+            <p className="mt-2 text-center text-xs text-muted">
+              Answers come only from your documents, with citations. Enter sends · Shift+Enter for a
+              new line.
+            </p>
           </div>
         </form>
       </div>
@@ -188,67 +250,88 @@ export default function ChatPage() {
 
 function Question({ text }: { text: string }) {
   return (
-    <div className="flex justify-end">
-      <p className="max-w-2xl rounded-2xl bg-brand px-4 py-2 text-sm text-white">{text}</p>
+    <div className="mx-auto flex max-w-3xl justify-end animate-fade-up">
+      <p className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-brand px-4 py-2.5 text-sm text-brand-ink shadow-soft">
+        {text}
+      </p>
     </div>
   );
 }
 
 function Answer({
   message,
+  activeCitation,
   onCitation,
   onRate,
 }: {
   message: ChatMessage;
+  activeCitation: Citation | null;
   onCitation: (citation: Citation) => void;
   onRate: (value: 1 | -1) => void;
 }) {
-  const usage = message.latency_ms?.total;
+  const seconds = message.latency_ms?.total ? (message.latency_ms.total / 1000).toFixed(1) : null;
+
   return (
-    <div className="max-w-3xl space-y-2">
-      <div className="prose-answer text-sm leading-relaxed">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-      </div>
-
-      {message.citations.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted">Sources:</span>
-          {message.citations.map((citation) => (
-            <button
-              key={citation.number}
-              onClick={() => onCitation(citation)}
-              className="rounded-full border border-line px-2.5 py-1 text-xs hover:border-brand hover:text-brand"
-              title={citation.snippet ?? undefined}
-            >
-              [{citation.number}] {citation.document_title}
-              {citation.page_start ? ` · p${citation.page_start}` : ""}
-            </button>
-          ))}
+    <div className="mx-auto flex max-w-3xl gap-3 animate-fade-up">
+      <LogoMark size={26} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="prose-answer text-sm leading-relaxed">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         </div>
-      )}
 
-      <div className="flex items-center gap-3 text-xs text-muted">
-        <button
-          onClick={() => onRate(1)}
-          className={message.feedback === 1 ? "text-good" : "hover:text-ink"}
-          aria-label="Helpful"
-        >
-          ▲ helpful
-        </button>
-        <button
-          onClick={() => onRate(-1)}
-          className={message.feedback === -1 ? "text-bad" : "hover:text-ink"}
-          aria-label="Not helpful"
-        >
-          ▼ not helpful
-        </button>
-        {message.model && <span>{message.model}</span>}
-        {usage && <span>{(usage / 1000).toFixed(1)}s</span>}
-        {message.input_tokens != null && (
-          <span>
-            {message.input_tokens}+{message.output_tokens} tokens
-          </span>
+        {message.citations.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {message.citations.map((citation) => {
+              const active = activeCitation?.number === citation.number;
+              return (
+                <button
+                  key={citation.number}
+                  onClick={() => onCitation(citation)}
+                  title={citation.snippet ?? undefined}
+                  className={`group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition hover:-translate-y-0.5 ${
+                    active
+                      ? "border-brand bg-brand-soft text-brand"
+                      : "border-line hover:border-brand hover:text-brand"
+                  }`}
+                >
+                  <span className="grid size-4 place-items-center rounded-full bg-brand/10 text-[10px] font-semibold text-brand">
+                    {citation.number}
+                  </span>
+                  <span className="max-w-52 truncate">{citation.document_title}</span>
+                  {citation.page_start && <span className="text-muted">p{citation.page_start}</span>}
+                </button>
+              );
+            })}
+          </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
+          <button
+            onClick={() => onRate(1)}
+            className={`rounded p-1 transition hover:bg-canvas ${
+              message.feedback === 1 ? "text-good" : "hover:text-ink"
+            }`}
+            aria-label="Helpful"
+          >
+            <ThumbsUp size={13} />
+          </button>
+          <button
+            onClick={() => onRate(-1)}
+            className={`rounded p-1 transition hover:bg-canvas ${
+              message.feedback === -1 ? "text-bad" : "hover:text-ink"
+            }`}
+            aria-label="Not helpful"
+          >
+            <ThumbsDown size={13} />
+          </button>
+          {message.model && <span>{message.model}</span>}
+          {seconds && <span>{seconds}s</span>}
+          {message.input_tokens != null && (
+            <span>
+              {message.input_tokens}+{message.output_tokens} tokens
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

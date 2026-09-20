@@ -22,7 +22,7 @@ import type {
   User,
 } from "@/lib/types";
 import { StatTile, UsageChart } from "@/components/UsageChart";
-import { Button, Card, Empty, ErrorNote, Input, Select } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Field, Input, Select, Skeleton, useToast } from "@/components/ui";
 
 const MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"];
 
@@ -61,14 +61,16 @@ export default function AdminPage() {
   const totals = usage?.totals;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-6">
-      <header>
-        <h1 className="text-xl font-semibold">Admin</h1>
-        <p className="text-sm text-muted">Usage and cost, people, and who may read what.</p>
+    <div className="mx-auto max-w-5xl space-y-5 p-8">
+      <header className="animate-fade-up">
+        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
+        <p className="mt-1 text-sm text-muted">
+          What it costs, who can use it, and who may read what.
+        </p>
       </header>
       <ErrorNote>{error}</ErrorNote>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatTile label="Questions (30 days)" value={totals?.questions ?? "—"} />
         <StatTile
           label="AI cost (30 days)"
@@ -83,7 +85,13 @@ export default function AdminPage() {
         <StatTile label="People" value={totals?.users ?? "—"} />
       </div>
 
-      <Card title="Cost per day">{usage && <UsageChart days={usage.days} />}</Card>
+      <Card
+        className="animate-fade-up"
+        title="Cost per day"
+        description="Embeddings, reranking and answers, across the last 30 days"
+      >
+        {usage ? <UsageChart days={usage.days} /> : <Skeleton className="h-44 w-full" />}
+      </Card>
 
       <UsersPanel users={users} onChange={load} setError={setError} />
       <GroupsPanel groups={groups} users={users} onChange={load} setError={setError} />
@@ -127,7 +135,7 @@ function UsersPanel({ users, onChange, setError }: PanelProps & { users: User[] 
   const [role, setRole] = useState("member");
 
   return (
-    <Card title="People">
+    <Card className="animate-fade-up" title="People" description="Roles decide what someone can do">
       <form
         className="mb-4 flex flex-wrap gap-2"
         onSubmit={(event) => {
@@ -208,7 +216,7 @@ function GroupsPanel({
   const [detail, setDetail] = useState<GroupDetail | null>(null);
 
   return (
-    <Card title="Groups">
+    <Card className="animate-fade-up" title="Groups" description="Access to restricted collections is granted to groups">
       <form
         className="mb-4 flex gap-2"
         onSubmit={(event) => {
@@ -337,7 +345,7 @@ function CollectionsPanel({
     });
 
   return (
-    <Card title="Collections">
+    <Card className="animate-fade-up" title="Collections" description="Folders of documents that share access rules">
       <form
         className="mb-4 flex flex-wrap gap-2"
         onSubmit={(event) => {
@@ -433,7 +441,7 @@ function SettingsPanel({
   const [saved, setSaved] = useState(false);
 
   return (
-    <Card title="Assistant settings">
+    <Card className="animate-fade-up" title="Assistant settings" description="How the assistant introduces itself, and which model answers">
       <form
         className="grid gap-3 md:grid-cols-2"
         onSubmit={(event) => {
@@ -453,34 +461,30 @@ function SettingsPanel({
           });
         }}
       >
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Organisation name</span>
+        <Field label="Organisation name">
           <Input
             className="w-full"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Assistant name</span>
+        </Field>
+        <Field label="Assistant name" hint="Used when it introduces itself">
           <Input
             className="w-full"
             placeholder="Kes"
             value={form.assistant_name}
             onChange={(e) => setForm({ ...form, assistant_name: e.target.value })}
           />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Tone</span>
+        </Field>
+        <Field label="Tone" hint="e.g. formal and concise">
           <Input
             className="w-full"
             placeholder="formal and concise"
             value={form.tone}
             onChange={(e) => setForm({ ...form, tone: e.target.value })}
           />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium">Model</span>
+        </Field>
+        <Field label="Model" hint="Cheaper models answer faster">
           <Select
             className="w-full"
             value={form.model}
@@ -493,7 +497,7 @@ function SettingsPanel({
               </option>
             ))}
           </Select>
-        </label>
+        </Field>
         <div className="md:col-span-2 flex items-center gap-3">
           <Button type="submit">Save settings</Button>
           {saved && <span className="text-xs text-good">Saved</span>}

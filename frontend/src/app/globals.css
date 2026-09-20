@@ -1,51 +1,310 @@
 @import "tailwindcss";
 
-/*
- * One small palette, defined once, so every page looks like the same product.
- * Tailwind v4 is configured in CSS: these custom properties become utilities
- * such as `bg-surface`, `text-muted` and `border-line`.
- */
-@theme {
-  --color-canvas: #f7f7f8;
-  --color-surface: #ffffff;
-  --color-line: #e4e4e7;
-  --color-ink: #18181b;
-  --color-muted: #6b7280;
-  --color-brand: #2563eb;
-  --color-brand-soft: #eff6ff;
-  /* Chart mark colour, validated against the chart surface for lightness,
-     chroma and contrast (dataviz validator) — light surface #ffffff. */
-  --color-chart: #2563eb;
-  --color-good: #15803d;
-  --color-warn: #b45309;
-  --color-bad: #b91c1c;
+/* =============================================================================
+   NEXA design system
+   -----------------------------------------------------------------------------
+   Colours are declared ONCE as plain CSS variables, then exposed to Tailwind
+   with `@theme inline` so every utility (bg-surface, text-muted, border-line…)
+   reads the variable at runtime. That's what makes the theme switch instant:
+   flipping `data-theme` on <html> repaints the whole app, no re-render needed.
+
+   Three states, in this order:
+     1. :root                              -> light (the default)
+     2. prefers-color-scheme: dark         -> dark, unless the user forced light
+     3. [data-theme="dark"]                -> dark, because the user chose it
+   ========================================================================== */
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-accent: var(--accent);
+  --color-chart: var(--chart);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12);
+  --shadow-lift: 0 2px 4px rgb(15 23 42 / 0.06), 0 16px 40px -16px rgb(15 23 42 / 0.28);
+
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.4s ease both;
+  --animate-slide-in: slide-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pulse-soft: pulse-soft 1.8s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-caret: caret 1s steps(2) infinite;
+  --animate-float: float 7s ease-in-out infinite;
+}
+
+:root {
+  --canvas: #f6f7f9;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --line: #e5e7eb;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --brand: #2563eb;
+  --brand-ink: #ffffff;
+  --brand-soft: #eff5ff;
+  --accent: #7c3aed;
+  /* Chart marks are validated against the chart surface (lightness band,
+     chroma floor, contrast) rather than picked by eye. */
+  --chart: #2563eb;
+  --good: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
-    --color-canvas: #111113;
-    --color-surface: #18181b;
-    --color-line: #27272a;
-    --color-ink: #f4f4f5;
-    --color-muted: #a1a1aa;
-    --color-brand: #60a5fa;
-    --color-brand-soft: #1e293b;
-    /* Dark mode is stepped separately, not flipped: #60a5fa sits outside the
-       dark lightness band, #3b82f6 passes on surface #18181b. */
-    --color-chart: #3b82f6;
-    --color-good: #4ade80;
-    --color-warn: #fbbf24;
-    --color-bad: #f87171;
+  :root:not([data-theme="light"]) {
+    --canvas: #0b0d12;
+    --surface: #12151c;
+    --raised: #171b24;
+    --line: #232935;
+    --ink: #e9edf5;
+    --muted: #94a3b8;
+    --brand: #60a5fa;
+    --brand-ink: #0b0d12;
+    --brand-soft: #16233a;
+    --accent: #a78bfa;
+    --chart: #3b82f6; /* stepped for the dark surface, not a flipped light value */
+    --good: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0b0d12;
+  --surface: #12151c;
+  --raised: #171b24;
+  --line: #232935;
+  --ink: #e9edf5;
+  --muted: #94a3b8;
+  --brand: #60a5fa;
+  --brand-ink: #0b0d12;
+  --brand-soft: #16233a;
+  --accent: #a78bfa;
+  --chart: #3b82f6;
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  color-scheme: dark;
+}
+
+/* `dark:` utilities follow the same rule as the tokens above. */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+  &:where(:root[data-theme="dark"] *) {
+    @slot;
   }
 }
 
 html,
 body {
-  background: var(--color-canvas);
-  color: var(--color-ink);
+  background: var(--canvas);
+  color: var(--ink);
 }
 
-/* Answers arrive as Markdown; keep them readable without a plugin. */
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 22%, transparent);
+}
+
+/* Scrollbars that don't shout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted) 35%, transparent) transparent;
+}
+
+/* ============================ motion ==================================== */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: 200% 0;
+  }
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes float {
+  50% {
+    transform: translateY(-14px);
+  }
+}
+
+/* Staggered entrances: <div class="stagger"> children appear one after another. */
+.stagger > * {
+  animation: var(--animate-fade-up);
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 0.06s;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 0.12s;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 0.18s;
+}
+.stagger > *:nth-child(5) {
+  animation-delay: 0.24s;
+}
+.stagger > *:nth-child(6) {
+  animation-delay: 0.3s;
+}
+
+/* The blinking block at the end of a streaming answer. */
+.caret::after {
+  content: "▍";
+  margin-left: 1px;
+  animation: var(--animate-caret);
+  color: var(--brand);
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--muted) 12%, transparent) 25%,
+    color-mix(in oklab, var(--muted) 22%, transparent) 37%,
+    color-mix(in oklab, var(--muted) 12%, transparent) 63%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border-radius: var(--radius-sm);
+}
+
+/* The soft colour wash behind the landing hero. */
+.aurora::before,
+.aurora::after {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.aurora::before {
+  width: 32rem;
+  height: 32rem;
+  top: -10rem;
+  left: -8rem;
+  background: color-mix(in oklab, var(--brand) 55%, transparent);
+  animation: var(--animate-float);
+}
+.aurora::after {
+  width: 26rem;
+  height: 26rem;
+  top: -4rem;
+  right: -6rem;
+  background: color-mix(in oklab, var(--accent) 45%, transparent);
+  animation: var(--animate-float);
+  animation-delay: -3s;
+}
+
+/* ---------------------------------------------------------------------------
+ * The pipeline diagram's connectors.
+ *
+ * A connector is just a 2px-tall box painted with a repeating gradient: 8px of
+ * colour, 8px of nothing. Sliding that gradient sideways by exactly one repeat
+ * (16px) makes the dashes appear to travel towards the next stage, and because
+ * the movement is one full repeat the loop is seamless.
+ *
+ * Doing it with a background rather than an SVG keeps the connector a plain
+ * flex child, so it stretches to whatever space is left between two cards.
+ * ------------------------------------------------------------------------- */
+@keyframes dash-flow {
+  to {
+    background-position: -16px 0;
+  }
+}
+
+.conn {
+  background-image: linear-gradient(90deg, var(--line) 0 8px, transparent 8px 16px);
+  background-size: 16px 100%;
+  transition: background-image 0.3s ease;
+}
+
+/* The stretch the data is currently travelling along. */
+.conn-live {
+  background-image: linear-gradient(90deg, var(--brand) 0 8px, transparent 8px 16px);
+  animation: dash-flow 0.55s linear infinite;
+}
+
+/* A stretch the data has already crossed: solid, but quiet. */
+.conn-done {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--brand) 45%, transparent) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+/* The halo on the stage that is currently working. */
+.stage-live {
+  border-color: color-mix(in oklab, var(--brand) 55%, var(--line));
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--brand) 14%, transparent),
+    0 12px 28px -12px color-mix(in oklab, var(--brand) 55%, transparent);
+}
+
+/* Someone who asked for less motion gets less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ======================= answer typography ============================== */
+
 .prose-answer > * + * {
   margin-top: 0.75rem;
 }
@@ -55,10 +314,16 @@ body {
   list-style: revert;
 }
 .prose-answer code {
-  background: var(--color-canvas);
-  padding: 0.1rem 0.3rem;
-  border-radius: 0.25rem;
+  background: var(--canvas);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-xs);
   font-size: 0.875em;
+}
+.prose-answer pre {
+  background: var(--canvas);
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
 }
 .prose-answer h1,
 .prose-answer h2,
@@ -71,7 +336,11 @@ body {
 }
 .prose-answer th,
 .prose-answer td {
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--line);
   padding: 0.35rem 0.5rem;
   text-align: left;
+}
+.prose-answer a {
+  color: var(--brand);
+  text-decoration: underline;
 }

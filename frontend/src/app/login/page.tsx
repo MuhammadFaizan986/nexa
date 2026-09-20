@@ -2,10 +2,21 @@
 
 /** Sign in to an organisation, or create a new one (which makes you its owner). */
 
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
+import { Logo } from "@/components/brand";
+import { ThemeToggle } from "@/components/theme";
+import { Button, ErrorNote, Field, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+
+const DEMOS = [
+  { slug: "harbourview-property-group", email: "owner@harbourview.example.com", label: "Property" },
+  { slug: "kestrel-pay", email: "owner@kestrelpay.example.com", label: "Fintech" },
+  { slug: "lumen-labs", email: "owner@lumenlabs.example.com", label: "Company" },
+];
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -31,14 +42,35 @@ export default function LoginPage() {
     }
   }
 
-  const field = "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand";
+  function useDemo(demo: (typeof DEMOS)[number]) {
+    setMode("login");
+    setTenantSlug(demo.slug);
+    setEmail(demo.email);
+    setPassword("nexa-demo-password");
+  }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
-      <div className="rounded-2xl border border-line bg-surface p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold">NEXA</h1>
+    <main className="aurora relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-10">
+      <div className="absolute inset-x-0 top-0 flex items-center justify-between px-5 py-4">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-ink"
+        >
+          <ArrowLeft size={15} />
+          Back
+        </Link>
+        <ThemeToggle compact />
+      </div>
+
+      <div className="relative w-full max-w-md animate-fade-up rounded-2xl border border-line bg-surface p-8 shadow-lift">
+        <Logo size={34} />
+        <h1 className="mt-5 text-xl font-semibold tracking-tight">
+          {mode === "login" ? "Welcome back" : "Create your organisation"}
+        </h1>
         <p className="mt-1 text-sm text-muted">
-          Ask questions across your documents. Every answer cites its source.
+          {mode === "login"
+            ? "Sign in to ask questions across your documents."
+            : "You'll be the owner, and can invite your team afterwards."}
         </p>
 
         <div className="mt-6 flex gap-1 rounded-lg bg-canvas p-1 text-sm">
@@ -47,8 +79,8 @@ export default function LoginPage() {
               key={option}
               type="button"
               onClick={() => setMode(option)}
-              className={`flex-1 rounded-md px-3 py-1.5 ${
-                mode === option ? "bg-surface font-medium shadow-sm" : "text-muted"
+              className={`flex-1 rounded-md px-3 py-1.5 transition ${
+                mode === option ? "bg-surface font-medium shadow-soft" : "text-muted"
               }`}
             >
               {option === "login" ? "Sign in" : "Create organisation"}
@@ -58,70 +90,72 @@ export default function LoginPage() {
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           {mode === "login" ? (
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">Organisation handle</span>
-              <input
-                className={field}
+            <Field label="Organisation handle">
+              <Input
+                className="w-full"
                 value={tenantSlug}
                 onChange={(e) => setTenantSlug(e.target.value)}
                 placeholder="harbourview-property-group"
                 required
               />
-            </label>
+            </Field>
           ) : (
-            <label className="block text-sm">
-              <span className="mb-1 block font-medium">Organisation name</span>
-              <input
-                className={field}
+            <Field label="Organisation name">
+              <Input
+                className="w-full"
                 value={organisation}
                 onChange={(e) => setOrganisation(e.target.value)}
                 placeholder="Harbourview Property Group"
                 required
               />
-            </label>
+            </Field>
           )}
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Email</span>
-            <input
+          <Field label="Email">
+            <Input
               type="email"
-              className={field}
+              className="w-full"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium">Password</span>
-            <input
+          </Field>
+          <Field
+            label="Password"
+            hint={mode === "register" ? "At least 10 characters" : undefined}
+          >
+            <Input
               type="password"
-              className={field}
+              className="w-full"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               minLength={mode === "register" ? 10 : 1}
               required
             />
-          </label>
+          </Field>
 
-          {error && (
-            <p className="rounded-lg bg-bad/10 px-3 py-2 text-sm text-bad" role="alert">
-              {error}
-            </p>
-          )}
+          <ErrorNote>{error}</ErrorNote>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-          >
-            {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create organisation"}
-          </button>
+          <Button type="submit" loading={busy} className="w-full">
+            {mode === "login" ? "Sign in" : "Create organisation"}
+          </Button>
         </form>
+
+        <div className="mt-6 border-t border-line pt-4">
+          <p className="text-xs text-muted">Or open a demo workspace:</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {DEMOS.map((demo) => (
+              <button
+                key={demo.slug}
+                type="button"
+                onClick={() => useDemo(demo)}
+                className="rounded-full border border-line px-3 py-1 text-xs transition hover:border-brand hover:text-brand"
+              >
+                {demo.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <p className="mt-4 text-center text-xs text-muted">
-        Demo data? Use <code>make seed</code>, then sign in as
-        <br />
-        <code>owner@harbourview.example.com</code> / <code>nexa-demo-password</code>
-      </p>
     </main>
   );
 }

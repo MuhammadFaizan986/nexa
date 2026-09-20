@@ -102,6 +102,11 @@ question ─▶ permission scope ─▶ embed ─▶ semantic (40) + keyword (40
 | Sources | `frontend/src/components/CitationPanel.tsx` | The quoted sentence, its page/section, and a link to the original file |
 | Documents | `frontend/src/app/(app)/documents/page.tsx` | Drag-and-drop upload; polls only while the worker is busy |
 | Admin | `frontend/src/app/(app)/admin/page.tsx` | Cost per day, people, groups, collection grants, assistant settings |
+| Landing | `frontend/src/app/page.tsx` | The public page: a self-running demo that types a question and streams the answer |
+| Pipeline diagram | `frontend/src/components/Pipeline.tsx` | The six stages (chunking → embedding → retrieval → reranking → answer) lighting up one at a time, with a plain-language caption for each |
+| Brand | `frontend/src/components/brand.tsx` | The NEXA mark — an "N" drawn as a retrieval path — used as logo, favicon and the assistant's avatar |
+| Theme | `frontend/src/components/theme.tsx` | Light / dark / system, remembered per browser, applied in `<head>` so there is no flash of the wrong theme |
+| Design tokens | `frontend/src/app/globals.css` | Colours, radii and every animation; each token has a light and a dark value, and all motion stops under `prefers-reduced-motion` |
 
 ---
 

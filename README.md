@@ -128,11 +128,16 @@ cost and per-stage latency. Pass `conversation_id` to ask a follow-up.
   and **PostgreSQL Row-Level Security** as a database-level safety net.
   Conversation history, per-message token/latency tracking, `usage_events`
   with cost estimates, and structured JSON-ready logs with request ids.
-- **Web UI** (Next.js + Tailwind): sign in or create an organisation; drag-and-drop
-  upload with live processing status; chat with streamed answers, clickable
-  source chips and a citation panel showing the quoted sentence and a link to
-  the original file; thumbs up/down; an admin dashboard with cost per day,
-  people, groups, collection grants and assistant settings (name, tone, model).
+- **Web UI** (Next.js + Tailwind): a landing page whose demo runs itself — a
+  question types, the answer streams, the sources appear — and an animated
+  six-stage diagram of how an answer is made (chunking → embedding → retrieval
+  → reranking → answer). Inside: sign in or create an organisation;
+  drag-and-drop upload with live processing status; chat with streamed answers,
+  clickable source chips and a citation panel showing the quoted sentence and a
+  link to the original file; thumbs up/down; an admin dashboard with cost per
+  day, people, groups, collection grants and assistant settings (name, tone,
+  model). **Light, dark and system themes** (no flash on load) and animation
+  throughout that switches itself off for `prefers-reduced-motion`.
 - **Tests**: 115 tests covering parsers, the cleaner, the chunker, citations,
   every search mode, fusion, reranking, filters, the eval metrics, streaming
   chat, background jobs, feedback, usage reporting, tenant settings,
