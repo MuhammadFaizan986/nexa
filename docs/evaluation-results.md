@@ -126,6 +126,31 @@ their dogs to the office?", 0.34) are refused cheaply.
   "I don't know" for questions the documents do answer, lower
   `MIN_RERANK_SCORE` (0.75 still stops 2 of 10 unanswerable questions here).
 
+## Answer quality (Week 6)
+
+Everything above measures *finding* the right passage. A second harness
+measures what the assistant then *says*:
+
+| Metric | Question it answers | How it's measured |
+|---|---|---|
+| Correctness | Does the answer match the reference answer? | LLM-as-judge |
+| Faithfulness | Is every claim supported by the passages it was given? | LLM-as-judge |
+| Citation support | Does the cited passage really say what it's attached to? | LLM-as-judge |
+| Correct refusals | Does it say "I don't know" when the documents don't cover it? | string match — free |
+| False refusals | Does it refuse although the answer was there? | string match — free |
+| Citation validity | Does every `[n]` point at a passage that exists? | computed — free |
+| Cited the expected source | Did the citation land on the document the dataset names? | computed — free |
+
+Refusals are counted separately for answerable and unanswerable questions,
+because they are different failures: refusing an answerable question makes the
+assistant useless, while answering an unanswerable one makes it untrustworthy.
+A single "refusal accuracy" number hides both.
+
+Answers and verdicts are cached in `backend/eval/.cache/answers.json`, keyed by
+the question, the passages and the models involved, so only what actually
+changed is paid for again. A question with an unreadable verdict is left out of
+the judged rates rather than counted as a pass.
+
 ## Reproduce
 
 ```bash
@@ -133,6 +158,12 @@ make seed                                  # demo tenants + documents (idempoten
 make reindex                               # after changing chunking/embedding/headers
 make eval ARGS='--label my-experiment'     # all configurations
 make eval ARGS='--config hybrid_rerank --label rerank'
+
+# Answer quality. This one spends real money — it prints the estimate first
+# and asks before starting.
+make eval-answers ARGS='--limit 5'         # smoke test, a few cents
+make eval-answers ARGS='--yes'             # all 50 questions, about $1
+make eval-answers ARGS='--no-judge --yes'  # refusals + citations only, no judge
 ```
 
 Question embeddings and reranker results are cached in `backend/eval/.cache/`,

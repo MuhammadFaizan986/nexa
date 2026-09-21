@@ -2,7 +2,7 @@
 COMPOSE = docker compose
 API = $(COMPOSE) exec api
 
-.PHONY: help up down logs worker-logs web-logs test test-unit lint format seed ask reindex eval psql migrate shell
+.PHONY: help up down logs worker-logs web-logs test test-unit lint format seed ask reindex eval eval-answers psql migrate shell
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -47,6 +47,9 @@ reindex:  ## Re-process documents after chunker/embedding changes (ARGS="--tenan
 
 eval:  ## Measure retrieval quality on the 50-question eval set (ARGS="--label baseline")
 	$(API) python -m eval.run_eval $(ARGS)
+
+eval-answers:  ## Measure ANSWER quality: correctness, faithfulness, citations, refusals (costs ~$1)
+	$(API) python -m eval.run_answer_eval $(ARGS)
 
 psql:  ## Open a SQL shell on the dev database
 	$(COMPOSE) exec db psql -U nexa -d nexa
