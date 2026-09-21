@@ -80,6 +80,21 @@ export type ChatMessage = {
   feedback?: number | null;
   created_at: string;
   citations: Citation[];
+  /** Set when a follow-up was rewritten before searching (Week 6). */
+  search_query?: string | null;
+  /** What the assistant did to find the answer, in agent mode. */
+  tool_steps?: ToolStep[];
+};
+
+/** One tool call the assistant made in agent mode (Week 6). */
+export type ToolStep = {
+  number: number;
+  tool: string;
+  arguments: Record<string, unknown>;
+  summary: string;
+  passages_found: number;
+  latency_ms: number;
+  error: boolean;
 };
 
 export type Conversation = { id: string; title: string | null; created_at: string };

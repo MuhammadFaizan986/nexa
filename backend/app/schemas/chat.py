@@ -67,6 +67,10 @@ class ChatRequest(FilterFields):
     question: str = Field(min_length=1, max_length=4000)
     conversation_id: uuid.UUID | None = None  # omit to start a new conversation
     collection_ids: list[uuid.UUID] | None = None
+    # Week 6: answer with tools — the model searches, reads and compares by
+    # itself until it can answer. Better for questions that span documents,
+    # and more expensive (a model call per step). None = the server default.
+    agent: bool | None = None
 
 
 class ConversationOut(BaseModel):
@@ -97,6 +101,12 @@ class MessageOut(BaseModel):
     latency_ms: dict | None
     created_at: datetime
     citations: list[CitationOut] = []
+    # Week 6: set when a follow-up was rewritten before searching, so the UI can
+    # show what was actually searched for — on reload too, not just live.
+    search_query: str | None = None
+    # Week 6: the tool calls behind an agent answer, so the trace is still
+    # there when the conversation is reopened.
+    tool_steps: list[dict] = []
 
 
 class ConversationDetail(ConversationOut):

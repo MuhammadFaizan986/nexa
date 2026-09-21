@@ -89,6 +89,33 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_refusal_fallback: bool = True
 
+    # ------------------------------------------------------------------ agent
+    # Agentic RAG (Week 6): instead of one search, the model is given tools and
+    # decides what to do — search again, read a document, compare two of them.
+    # It costs more (one model call per step), so it is opt-in per question
+    # unless agent_default is on. See services/agent/.
+    agent_tools_enabled: bool = True
+    agent_default: bool = False
+    # A hard stop on tool calls per question: a loop that never converges must
+    # not be able to spend an unbounded amount of money.
+    agent_max_steps: int = 6
+
+    # ------------------------------------------------- follow-up query rewriting
+    # "What about Unit 7A?" means nothing to a search engine. Before retrieving,
+    # we ask a small model to rewrite a follow-up into a question that stands on
+    # its own ("What is the notice period for Unit 7A?"). See
+    # services/generation/rewrite.py.
+    query_rewrite: bool = True
+    # A cheap, fast model: this is a one-line transformation, not reasoning, and
+    # it sits in front of every follow-up question, so latency and cost matter
+    # more than depth here.
+    rewrite_model: str = "claude-haiku-4-5-20251001"
+    rewrite_max_tokens: int = 120
+    # Normally we only pay for a rewrite when the question looks like it depends
+    # on the conversation (see looks_context_dependent). Set this to rewrite
+    # every follow-up instead — more reliable, more calls.
+    rewrite_always: bool = False
+
     # ------------------------------------------------------------------ chunking
     # Plan section 9.1: ~500–800 tokens per chunk with ~10–15% overlap.
     chunk_size_tokens: int = 600

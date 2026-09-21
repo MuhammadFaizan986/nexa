@@ -10,6 +10,7 @@ A model missing from the table is recorded with cost NULL (tokens are still
 recorded, so cost can be back-filled later).
 """
 
+import re
 import uuid
 from decimal import Decimal
 
@@ -49,8 +50,16 @@ PRICES_PER_RERANK_SEARCH: dict[str, Decimal] = {
 _MILLION = Decimal(1_000_000)
 
 
+# Providers return dated model ids ("claude-haiku-4-5-20251001") while the price
+# list above names families ("claude-haiku-4-5"), because the price is the same
+# for every snapshot of a model. Strip the date before looking a price up.
+_MODEL_SNAPSHOT_DATE = re.compile(r"-\d{8}$")
+
+
 def estimate_cost(model: str, input_tokens: int, output_tokens: int = 0) -> Decimal | None:
-    prices = PRICES_PER_MILLION_TOKENS.get(model)
+    prices = PRICES_PER_MILLION_TOKENS.get(model) or PRICES_PER_MILLION_TOKENS.get(
+        _MODEL_SNAPSHOT_DATE.sub("", model)
+    )
     if prices is None:
         return None
     input_price, output_price = prices

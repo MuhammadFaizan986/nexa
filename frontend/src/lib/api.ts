@@ -11,6 +11,8 @@
  * move them to httpOnly cookies (a Week 7 hardening task).
  */
 
+import type { ToolStep } from "@/lib/types";
+
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8010/api/v1";
 
@@ -94,10 +96,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 /** Streamed chat: Server-Sent Events read straight from the response body. */
 export async function streamChat(
-  payload: { question: string; conversation_id?: string; collection_ids?: string[] },
+  payload: {
+    question: string;
+    conversation_id?: string;
+    collection_ids?: string[];
+    /** Agent mode: let the model search, read and compare by itself (Week 6). */
+    agent?: boolean;
+  },
   handlers: {
     onMeta?: (data: any) => void;
     onToken?: (text: string) => void;
+    /** One completed tool call, streamed as it happens in agent mode. */
+    onTool?: (step: ToolStep) => void;
     onDone?: (data: any) => void;
     onError?: (detail: string) => void;
   },
@@ -136,6 +146,7 @@ export async function streamChat(
       const data = JSON.parse(raw);
       if (event === "meta") handlers.onMeta?.(data);
       else if (event === "token") handlers.onToken?.(data.text);
+      else if (event === "tool") handlers.onTool?.(data as ToolStep);
       else if (event === "done") handlers.onDone?.(data);
       else if (event === "error") handlers.onError?.(data.detail);
     }

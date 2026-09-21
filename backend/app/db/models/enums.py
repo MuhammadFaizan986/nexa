@@ -53,6 +53,7 @@ class UsageEventType(StrEnum):
     CHAT = "chat"  # LLM answer generation
     RERANK = "rerank"  # Week 3
     INGEST = "ingest"  # embedding document chunks at upload time
+    REWRITE = "rewrite"  # Week 6: rewriting a follow-up into a standalone query
 
 
 def sql_in(enum_cls: type[StrEnum]) -> str:

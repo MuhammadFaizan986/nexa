@@ -85,6 +85,7 @@ async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> Str
         assistant_name=tenant.settings.get("assistant_name"),
         tone=tenant.settings.get("tone"),
         model=tenant.settings.get("model"),
+        agent=body.agent if body.agent is not None else get_settings().agent_default,
     )
     return StreamingResponse(
         stream_answer(turn),
@@ -155,6 +156,8 @@ async def get_conversation(
                 latency_ms=m.latency_ms,
                 created_at=m.created_at,
                 citations=citations.get(m.id, []),
+                search_query=(m.meta or {}).get("search_query"),
+                tool_steps=(m.meta or {}).get("tool_steps") or [],
             )
             for m in messages
         ],

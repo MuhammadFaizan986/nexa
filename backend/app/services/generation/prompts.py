@@ -58,9 +58,17 @@ def build_system_prompt(
     return prompt
 
 
-def format_passages(chunks: list[RetrievedChunk]) -> str:
+def format_passages(chunks: list[RetrievedChunk], numbers: list[int] | None = None) -> str:
+    """
+    Number the passages and wrap each in a <passage> tag.
+
+    `numbers` overrides the default 1..n. The agent (services/agent/) needs it:
+    its passages arrive across several tool calls, and each one keeps the number
+    it was first given so a citation still resolves at the end.
+    """
     parts = []
-    for number, chunk in enumerate(chunks, start=1):
+    for index, chunk in enumerate(chunks):
+        number = numbers[index] if numbers else index + 1
         attrs = f'id="{number}" document={quoteattr(chunk.document_title)}'
         if chunk.page_start is not None:
             pages = (

@@ -1,12 +1,21 @@
 """
 The question-answering pipeline, streamed to the client as Server-Sent Events.
 
+There are two ways to answer, chosen per question:
+
+    RAG mode (the default) — one search, one answer:
+
     question
+      -> rewrite a follow-up into a standalone query        (latency: rewrite)
       -> retrieve: embed, semantic + keyword search, fuse, rerank
                                    (latency: embed_query, semantic, keyword, rerank, retrieval)
       -> relevance gate: best score too low? -> "I don't know", no LLM call
       -> LLM streams an answer citing [n] passages    (latency: llm_first_token, llm_total)
       -> validate citations, save message + citations + usage
+
+    Agent mode (opt-in, `agent: true`) — the model uses tools until it can
+    answer: search again, read a document, compare two of them. Each tool call
+    is streamed to the client as a `tool` event. See services/agent/.
 
 Server-Sent Events (SSE) is a simple one-way streaming format over plain HTTP:
 the server keeps the response open and writes blocks like
@@ -19,6 +28,7 @@ Our events, in order:
 
     meta   -> {"conversation_id", "user_message_id"}     (immediately)
     token  -> {"text": "..."}                             (many)
+    tool   -> {"number", "tool", "summary", ...}          (agent mode only)
     done   -> {"message_id", "citations", "usage", ...}   (once, at the end)
     error  -> {"detail": "..."}                           (instead of done, on failure)
 
@@ -38,6 +48,7 @@ from app.core.logging import get_logger
 from app.db.models import Message, MessageCitation, MessageRole, UsageEventType
 from app.db.rls import use_tenant
 from app.db.session import SessionLocal
+from app.services.agent.loop import AgentDone, AgentStep, run_agent
 from app.services.generation.citations import CitationResult, resolve_citations
 from app.services.generation.llm import StreamEnd, TextDelta, get_llm_provider
 from app.services.generation.prompts import (
@@ -46,6 +57,7 @@ from app.services.generation.prompts import (
     build_user_message,
     history_for_prompt,
 )
+from app.services.generation.rewrite import RewriteResult, rewrite_question
 from app.services.retrieval.base import RetrievedChunk, SearchFilters
 from app.services.retrieval.retriever import (
     gate_score,
@@ -78,6 +90,9 @@ class ChatTurn:
     assistant_name: str | None = None
     tone: str | None = None
     model: str | None = None
+    # Week 6: answer with tools (the model searches, reads and compares by
+    # itself) instead of one search + one answer. Costs more, so it's opt-in.
+    agent: bool = False
 
 
 def sse(event: str, data: dict) -> str:
@@ -103,40 +118,45 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
     use_tenant(turn.tenant_id)
     try:
         async with SessionLocal() as session:
-            # 1-2. Retrieve: embed the question, run semantic + keyword search
-            #      (tenant, permission and metadata filters inside the SQL), fuse
-            #      them, rerank the best candidates. See services/retrieval/.
-            retrieval = await retrieve(
-                session,
-                tenant_id=turn.tenant_id,
-                collection_ids=turn.collection_ids,
-                query=turn.question,
-                filters=turn.filters,
+            # 1. Rewrite a follow-up into a question that stands on its own, so
+            #    "what about the pet bond?" searches for the pet bond OF UNIT 4B.
+            #    Skipped (free) for a first question or a self-contained one, and
+            #    it falls back to the original on any problem. See
+            #    services/generation/rewrite.py.
+            # In agent mode the model writes its own search queries, so there
+            # is nothing for a rewrite to fix and no reason to pay for one.
+            rewrite = (
+                RewriteResult(turn.question, turn.question, False, "agent")
+                if turn.agent
+                else await rewrite_question(turn.question, turn.history)
             )
-            passages = retrieval.chunks
-            latency.update(retrieval.latency_ms)
+            if rewrite.model:
+                # Only when the model was really called: a skipped rewrite costs
+                # no time, and a zero in the latency chart would imply otherwise.
+                latency["rewrite"] = rewrite.latency_ms
 
-            # 3. Relevance gate. If even the best passage is barely related, the
-            #    honest answer is "I don't know" — and we save the LLM call.
-            low_relevance = not passes_relevance_gate(retrieval)
-
+            system_prompt = build_system_prompt(turn.tenant_name, turn.assistant_name, turn.tone)
             answer_parts: list[str] = []
             end: StreamEnd | None = None
-            if low_relevance:
-                answer_parts.append(NO_ANSWER)
-                yield sse("token", {"text": NO_ANSWER})
-            else:
-                # 4. Generate, forwarding tokens to the client as they arrive.
-                llm = get_llm_provider()
-                messages = [
-                    *history_for_prompt(turn.history),
-                    {"role": "user", "content": build_user_message(turn.question, passages)},
-                ]
+            retrieval = None  # one search (RAG mode); the agent runs its own
+            retrievals: list = []
+            steps: list[AgentStep] = []
+            agent_result: AgentDone | None = None
+            low_relevance = False
+
+            if turn.agent:
+                # 2-5. Agent mode: the model decides what to look up, and we
+                #      stream both its text and each tool call as it happens.
+                #      See services/agent/loop.py.
                 t = time.perf_counter()
-                async for event in llm.stream(
-                    system=build_system_prompt(turn.tenant_name, turn.assistant_name, turn.tone),
-                    messages=messages,
-                    max_tokens=settings.llm_max_tokens,
+                async for event in run_agent(
+                    session,
+                    tenant_id=turn.tenant_id,
+                    collection_ids=turn.collection_ids,
+                    question=turn.question,
+                    history=turn.history,
+                    system=system_prompt,
+                    filters=turn.filters,
                     model=turn.model,
                 ):
                     if isinstance(event, TextDelta):
@@ -144,18 +164,75 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                             latency["llm_first_token"] = _ms(t)
                         answer_parts.append(event.text)
                         yield sse("token", {"text": event.text})
+                    elif isinstance(event, AgentStep):
+                        steps.append(event)
+                        yield sse("tool", asdict(event))
                     else:
-                        end = event
+                        agent_result = event
                 latency["llm_total"] = _ms(t)
 
-                if end and end.stop_reason == "refusal" and not "".join(answer_parts).strip():
-                    # Every model in the fallback chain declined. Say so plainly.
-                    answer_parts.append(MODEL_REFUSAL_TEXT)
-                    yield sse("token", {"text": MODEL_REFUSAL_TEXT})
+                assert agent_result is not None
+                passages = agent_result.passages
+                retrievals = agent_result.retrievals
+                end = StreamEnd(
+                    model=agent_result.model or settings.llm_model,
+                    input_tokens=agent_result.input_tokens,
+                    output_tokens=agent_result.output_tokens,
+                    stop_reason=agent_result.stop_reason,
+                )
+            else:
+                # 2-3. Retrieve: embed the question, run semantic + keyword search
+                #      (tenant, permission and metadata filters inside the SQL), fuse
+                #      them, rerank the best candidates. See services/retrieval/.
+                retrieval = await retrieve(
+                    session,
+                    tenant_id=turn.tenant_id,
+                    collection_ids=turn.collection_ids,
+                    query=rewrite.query,
+                    filters=turn.filters,
+                )
+                retrievals = [retrieval]
+                passages = retrieval.chunks
+                latency.update(retrieval.latency_ms)
+
+                # 4. Relevance gate. If even the best passage is barely related, the
+                #    honest answer is "I don't know" — and we save the LLM call.
+                low_relevance = not passes_relevance_gate(retrieval)
+
+                if low_relevance:
+                    answer_parts.append(NO_ANSWER)
+                    yield sse("token", {"text": NO_ANSWER})
+                else:
+                    # 5. Generate, forwarding tokens to the client as they arrive.
+                    llm = get_llm_provider()
+                    messages = [
+                        *history_for_prompt(turn.history),
+                        {"role": "user", "content": build_user_message(turn.question, passages)},
+                    ]
+                    t = time.perf_counter()
+                    async for event in llm.stream(
+                        system=system_prompt,
+                        messages=messages,
+                        max_tokens=settings.llm_max_tokens,
+                        model=turn.model,
+                    ):
+                        if isinstance(event, TextDelta):
+                            if not answer_parts:
+                                latency["llm_first_token"] = _ms(t)
+                            answer_parts.append(event.text)
+                            yield sse("token", {"text": event.text})
+                        else:
+                            end = event
+                    latency["llm_total"] = _ms(t)
+
+                    if end and end.stop_reason == "refusal" and not "".join(answer_parts).strip():
+                        # Every model in the fallback chain declined. Say so plainly.
+                        answer_parts.append(MODEL_REFUSAL_TEXT)
+                        yield sse("token", {"text": MODEL_REFUSAL_TEXT})
 
             answer = "".join(answer_parts)
 
-            # 5. Citations: keep only [n] that point at a passage we really sent.
+            # 6. Citations: keep only [n] that point at a passage we really sent.
             cited = (
                 resolve_citations(answer, passages)
                 if not low_relevance
@@ -163,7 +240,7 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
             )
             latency["total"] = _ms(started)
 
-            # 6. Persist the answer, its citations and the usage.
+            # 7. Persist the answer, its citations and the usage.
             message = Message(
                 conversation_id=turn.conversation_id,
                 role=MessageRole.ASSISTANT,
@@ -176,11 +253,17 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                     "no_answer": low_relevance or NO_ANSWER.lower() in answer.lower(),
                     "low_relevance": low_relevance,
                     "stop_reason": end.stop_reason if end else None,
-                    "retrieval_mode": retrieval.mode,
-                    "reranked": retrieval.reranked,
-                    "gate_score": gate_score(retrieval),
+                    "search_query": rewrite.query if rewrite.rewritten else None,
+                    "rewrite_reason": rewrite.reason,
+                    "retrieval_mode": retrieval.mode if retrieval else "agent",
+                    "reranked": retrieval.reranked if retrieval else None,
+                    "gate_score": gate_score(retrieval) if retrieval else None,
                     "retrieved": _retrieval_trace(passages),
                     "invalid_citations": cited.invalid_numbers,
+                    # The tool trace: what the assistant did to find the answer.
+                    "agent": bool(turn.agent),
+                    "tool_steps": [asdict(step) for step in steps],
+                    "hit_step_limit": bool(agent_result and agent_result.hit_step_limit),
                 },
             )
             session.add(message)
@@ -196,9 +279,20 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                         snippet=c.snippet,
                     )
                 )
-            record_retrieval_usage(
-                session, retrieval, tenant_id=turn.tenant_id, user_id=turn.user_id
-            )
+            for result in retrievals:
+                record_retrieval_usage(
+                    session, result, tenant_id=turn.tenant_id, user_id=turn.user_id
+                )
+            if rewrite.model and (rewrite.input_tokens or rewrite.output_tokens):
+                record_usage(
+                    session,
+                    tenant_id=turn.tenant_id,
+                    user_id=turn.user_id,
+                    event_type=UsageEventType.REWRITE,
+                    model=rewrite.model,
+                    input_tokens=rewrite.input_tokens,
+                    output_tokens=rewrite.output_tokens,
+                )
             if end:
                 record_usage(
                     session,
@@ -216,9 +310,12 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
             conversation_id=str(turn.conversation_id),
             message_id=str(message.id),
             passages=len(passages),
-            mode=retrieval.mode,
-            reranked=retrieval.reranked,
-            gate_score=round(gate_score(retrieval) or 0.0, 4),
+            rewritten=rewrite.rewritten,
+            agent=turn.agent,
+            tool_calls=len(steps),
+            mode=retrieval.mode if retrieval else "agent",
+            reranked=retrieval.reranked if retrieval else None,
+            gate_score=round(gate_score(retrieval) or 0.0, 4) if retrieval else None,
             low_relevance=low_relevance,
             citations=len(cited.citations),
             invalid_citations=len(cited.invalid_numbers),
@@ -231,11 +328,13 @@ async def stream_answer(turn: ChatTurn) -> AsyncIterator[str]:
                 "citations": [asdict(c) for c in cited.citations],
                 "invalid_citations": cited.invalid_numbers,
                 "no_answer": message.meta["no_answer"],
+                "search_query": rewrite.query if rewrite.rewritten else None,
+                "tool_steps": [asdict(step) for step in steps],
                 "model": message.model,
                 "usage": {
                     "input_tokens": message.input_tokens,
                     "output_tokens": message.output_tokens,
-                    "cost_usd": _question_cost(retrieval, end),
+                    "cost_usd": _question_cost(retrievals, end, rewrite),
                 },
                 "latency_ms": latency,
             },
@@ -265,14 +364,22 @@ def _retrieval_trace(passages: list[RetrievedChunk]) -> list[dict]:
     ]
 
 
-def _question_cost(retrieval, end: StreamEnd | None):
-    """LLM + reranker + question-embedding cost for this answer (None if unknown)."""
+def _question_cost(retrievals: list, end: StreamEnd | None, rewrite: RewriteResult | None = None):
+    """
+    What this one answer cost: the model, the rewrite, and every search.
+
+    `retrievals` is a list because an agent answer runs several searches, each
+    embedding a query and calling the reranker. Plain RAG passes a list of one.
+    """
     parts = []
+    if rewrite and rewrite.model and (rewrite.input_tokens or rewrite.output_tokens):
+        parts.append(estimate_cost(rewrite.model, rewrite.input_tokens, rewrite.output_tokens))
     if end:
         parts.append(estimate_cost(end.model, end.input_tokens, end.output_tokens))
-    if retrieval.reranked and retrieval.reranker_model:
-        parts.append(estimate_rerank_cost(retrieval.reranker_model))
-    if retrieval.embedding_model:
-        parts.append(estimate_cost(retrieval.embedding_model, retrieval.embedding_tokens))
+    for retrieval in retrievals:
+        if retrieval.reranked and retrieval.reranker_model:
+            parts.append(estimate_rerank_cost(retrieval.reranker_model))
+        if retrieval.embedding_model:
+            parts.append(estimate_cost(retrieval.embedding_model, retrieval.embedding_tokens))
     known = [p for p in parts if p is not None]
     return sum(known) if known else None

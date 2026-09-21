@@ -9,12 +9,18 @@
  */
 
 import {
+  ArrowDownWideNarrow,
+  Check,
+  FileStack,
+  FileText,
   MessageSquarePlus,
+  Scissors,
   Search,
   SendHorizonal,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
+  Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -24,7 +30,13 @@ import { CitationPanel } from "@/components/CitationPanel";
 import { LogoMark } from "@/components/brand";
 import { Button, Empty, ErrorNote, useToast } from "@/components/ui";
 import { ApiError, request, streamChat } from "@/lib/api";
-import type { ChatMessage, Citation, Conversation, ConversationDetail } from "@/lib/types";
+import type {
+  ChatMessage,
+  Citation,
+  Conversation,
+  ConversationDetail,
+  ToolStep,
+} from "@/lib/types";
 
 const SUGGESTIONS = [
   "What is the notice period for terminating the lease for Unit 4B?",
@@ -32,7 +44,15 @@ const SUGGESTIONS = [
   "How many days of annual leave do I get after 3 years?",
 ];
 
-type Draft = { question: string; answer: string };
+type Draft = { question: string; answer: string; steps: ToolStep[] };
+
+/**
+ * Agent mode. Off by default because it costs more: the model may call several
+ * tools, and each round trip is another paid request. It earns its keep on
+ * questions that span documents ("compare the two leases"), where one search
+ * can't reach both answers.
+ */
+const AGENT_HINT = "Let the assistant search, read and compare by itself";
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -43,6 +63,7 @@ export default function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [citation, setCitation] = useState<Citation | null>(null);
+  const [agent, setAgent] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const notify = useToast();
@@ -72,17 +93,23 @@ export default function ChatPage() {
     setQuestion("");
     setError(null);
     setBusy(true);
-    setDraft({ question: asked, answer: "" });
+    setDraft({ question: asked, answer: "", steps: [] });
 
     let newConversationId = conversationId;
     await streamChat(
-      { question: asked, conversation_id: conversationId ?? undefined },
+      { question: asked, conversation_id: conversationId ?? undefined, agent },
       {
         onMeta: (data) => {
           newConversationId = data.conversation_id;
         },
         onToken: (text) =>
           setDraft((current) => (current ? { ...current, answer: current.answer + text } : current)),
+        // Each tool call appears the moment it finishes, so the wait is
+        // narrated instead of silent.
+        onTool: (step) =>
+          setDraft((current) =>
+            current ? { ...current, steps: [...current.steps, step] } : current,
+          ),
         onDone: async () => {
           if (newConversationId) await openConversation(newConversationId);
           await loadConversations();
@@ -187,18 +214,21 @@ export default function ChatPage() {
               <Question text={draft.question} />
               <div className="mx-auto flex max-w-3xl gap-3">
                 <LogoMark size={26} className="mt-0.5 shrink-0" />
-                <div className="prose-answer min-w-0 text-sm leading-relaxed">
-                  {draft.answer ? (
-                    <p>
-                      {draft.answer}
-                      <span className="caret" />
-                    </p>
-                  ) : (
-                    <span className="flex items-center gap-2 text-muted">
-                      <Search size={14} className="animate-pulse-soft" />
-                      Searching your documents…
-                    </span>
-                  )}
+                <div className="min-w-0 flex-1 space-y-3">
+                  {draft.steps.length > 0 && <ToolTrace steps={draft.steps} live={busy} />}
+                  <div className="prose-answer text-sm leading-relaxed">
+                    {draft.answer ? (
+                      <p>
+                        {draft.answer}
+                        <span className="caret" />
+                      </p>
+                    ) : (
+                      <span className="flex items-center gap-2 text-muted">
+                        <Search size={14} className="animate-pulse-soft" />
+                        {agent ? "Working on it…" : "Searching your documents…"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -216,6 +246,21 @@ export default function ChatPage() {
           <div className="mx-auto max-w-3xl">
             <ErrorNote>{error}</ErrorNote>
             <div className="mt-2 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 shadow-soft transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <button
+                type="button"
+                onClick={() => setAgent((on) => !on)}
+                title={AGENT_HINT}
+                aria-pressed={agent}
+                className={`mb-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition ${
+                  agent
+                    ? "border-brand bg-brand-soft text-brand"
+                    : "border-line text-muted hover:border-brand hover:text-brand"
+                }`}
+              >
+                <Wrench size={13} />
+                Agent
+                {agent && <Check size={12} />}
+              </button>
               <textarea
                 ref={input}
                 value={question}
@@ -236,8 +281,9 @@ export default function ChatPage() {
               </Button>
             </div>
             <p className="mt-2 text-center text-xs text-muted">
-              Answers come only from your documents, with citations. Enter sends · Shift+Enter for a
-              new line.
+              {agent
+                ? "Agent mode: the assistant searches, reads and compares by itself — slower, and it costs more per question."
+                : "Answers come only from your documents, with citations. Enter sends · Shift+Enter for a new line."}
             </p>
           </div>
         </form>
@@ -275,6 +321,23 @@ function Answer({
     <div className="mx-auto flex max-w-3xl gap-3 animate-fade-up">
       <LogoMark size={26} className="mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1 space-y-3">
+        {/* A follow-up like "what about the pet bond?" can't be searched for as
+            typed, so it was rewritten first. Showing the rewrite is how someone
+            checks the assistant understood which lease they meant. */}
+        {message.tool_steps && message.tool_steps.length > 0 && (
+          <ToolTrace steps={message.tool_steps} />
+        )}
+
+        {message.search_query && (
+          <p
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-canvas px-2.5 py-1 text-xs text-muted"
+            title="Your follow-up was rewritten into a standalone question before searching"
+          >
+            <Search size={12} className="shrink-0" />
+            <span className="truncate">Searched for: {message.search_query}</span>
+          </p>
+        )}
+
         <div className="prose-answer text-sm leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
         </div>
@@ -334,5 +397,54 @@ function Answer({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * What the assistant did before answering.
+ *
+ * In agent mode the wait is longer than plain RAG — several model calls and
+ * several searches — so showing each step as it completes turns a silent pause
+ * into a narration. It is also the honest answer to "why did this question
+ * cost more than that one".
+ */
+const TOOL_ICONS: Record<string, typeof Search> = {
+  search_documents: Search,
+  list_documents: FileStack,
+  summarize_document: FileText,
+  extract_fields: Scissors,
+  compare_documents: ArrowDownWideNarrow,
+};
+
+function ToolTrace({ steps, live = false }: { steps: ToolStep[]; live?: boolean }) {
+  return (
+    <ol className="space-y-1.5 rounded-xl border border-line bg-canvas/60 p-3">
+      {steps.map((step) => {
+        const Icon = TOOL_ICONS[step.tool] ?? Wrench;
+        return (
+          <li key={step.number} className="flex items-start gap-2 text-xs animate-fade-up">
+            <span
+              className={`mt-px grid size-5 shrink-0 place-items-center rounded-md ${
+                step.error ? "bg-bad/10 text-bad" : "bg-brand-soft text-brand"
+              }`}
+            >
+              <Icon size={12} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className={step.error ? "text-bad" : "text-ink"}>{step.summary}</span>
+              <span className="ml-1.5 text-muted">{(step.latency_ms / 1000).toFixed(1)}s</span>
+            </span>
+          </li>
+        );
+      })}
+      {live && (
+        <li className="flex items-center gap-2 text-xs text-muted">
+          <span className="grid size-5 shrink-0 place-items-center">
+            <Sparkles size={12} className="animate-pulse-soft" />
+          </span>
+          Thinking…
+        </li>
+      )}
+    </ol>
   );
 }

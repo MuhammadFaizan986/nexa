@@ -80,9 +80,12 @@ class SearchFilters:
     metadata: dict[str, Any] = field(default_factory=dict)
     date_from: date | None = None
     date_to: date | None = None
+    # Restrict the search to particular documents. Used by the agent's
+    # compare_documents tool, which searches inside one lease at a time.
+    document_ids: list[uuid.UUID] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not (self.metadata or self.date_from or self.date_to)
+        return not (self.metadata or self.date_from or self.date_to or self.document_ids)
 
     def to_sql(self) -> tuple[str, dict[str, Any]]:
         """Extra `AND ...` clauses for a query aliasing chunks as `c`, plus their params."""
@@ -93,6 +96,9 @@ class SearchFilters:
             # chunks_metadata_gin. Chunks store the document's metadata under "doc".
             clauses.append("c.metadata @> CAST(:filter_metadata AS jsonb)")
             params["filter_metadata"] = json.dumps({"doc": self.metadata})
+        if self.document_ids:
+            clauses.append("c.document_id = ANY(:filter_document_ids)")
+            params["filter_document_ids"] = list(self.document_ids)
         # ISO dates ("2026-03-01") sort correctly as plain strings.
         if self.date_from:
             clauses.append("(c.metadata #>> '{doc,date}') >= :filter_date_from")

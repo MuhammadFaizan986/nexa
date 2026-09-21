@@ -143,3 +143,51 @@ async def test_chat_with_no_documents_says_i_dont_know(client, make_tenant):
         ).text
     )
     assert events[-1][1]["no_answer"] is True
+
+
+async def test_follow_up_is_rewritten_before_searching(client, make_tenant):
+    """
+    Week 6: "what about ...?" is meaningless to a search engine on its own, so
+    the follow-up is rewritten into a standalone query first, and THAT is what
+    retrieval sees. The user's own words are still what gets stored and shown.
+    """
+    tenant = await make_tenant()
+    await tenant.upload("lease.md", LEASE_MD)
+
+    first = parse_sse(
+        (
+            await client.post(
+                "/chat", headers=tenant.headers, json={"question": "What is the rent for Unit 4B?"}
+            )
+        ).text
+    )
+    # Nothing to fold in on the first question, so no rewrite and no extra cost.
+    assert first[-1][1]["search_query"] is None
+
+    conversation_id = first[0][1]["conversation_id"]
+    second = parse_sse(
+        (
+            await client.post(
+                "/chat",
+                headers=tenant.headers,
+                json={
+                    "question": "and what about terminating it?",
+                    "conversation_id": conversation_id,
+                },
+            )
+        ).text
+    )
+    done = second[-1][1]
+    assert done["search_query"] is not None
+    # The subject came from the previous turn, which is the whole point.
+    assert "Unit 4B" in done["search_query"]
+    assert "rewrite" in done["latency_ms"]
+
+    # The question stored for the user is still the question they typed.
+    detail = (await client.get(f"/conversations/{conversation_id}", headers=tenant.headers)).json()
+    assert detail["messages"][2]["content"] == "and what about terminating it?"
+
+    # The rewrite is a billable call, so it is recorded like any other.
+    async with SessionLocal() as session:
+        types = set(await session.scalars(select(UsageEvent.event_type)))
+    assert "rewrite" in types
