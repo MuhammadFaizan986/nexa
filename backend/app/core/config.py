@@ -171,6 +171,24 @@ class Settings(BaseSettings):
     history_messages: int = 6
 
     # ------------------------------------------------------------------ validators
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _use_the_psycopg_driver(cls, value: object) -> object:
+        """
+        Accept the URL hosting platforms actually hand out.
+
+        Railway, Render, Heroku and friends all give you `postgres://user:pass@host/db`.
+        SQLAlchemy needs the driver in the scheme — without `+psycopg` it reaches
+        for psycopg2, which isn't installed, and the app dies at startup with an
+        error that says nothing about the real problem. Rewriting the scheme here
+        means you can paste the platform's URL in unchanged.
+        """
+        if isinstance(value, str):
+            for prefix in ("postgres://", "postgresql://"):
+                if value.startswith(prefix):
+                    return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
+
     @field_validator(
         "llm_effort",
         "embedding_model",

@@ -38,3 +38,20 @@ def test_tampered_or_unsigned_tokens_are_rejected():
     unsigned = jwt.encode(claims, key=None, algorithm="none")
     with pytest.raises(TokenError):
         decode_token(unsigned, expected_type="access")
+
+
+def test_platform_database_urls_get_the_psycopg_driver():
+    """
+    Railway, Render and Heroku hand out `postgres://...`. SQLAlchemy would then
+    look for psycopg2, which isn't installed, and the app would die at startup
+    with a confusing error — so the scheme is rewritten on the way in.
+    """
+    from app.core.config import Settings
+
+    plain = Settings(database_url="postgres://u:p@host:5432/db")
+    longer = Settings(database_url="postgresql://u:p@host:5432/db")
+    already = Settings(database_url="postgresql+psycopg://u:p@host:5432/db")
+
+    assert plain.database_url == "postgresql+psycopg://u:p@host:5432/db"
+    assert longer.database_url == "postgresql+psycopg://u:p@host:5432/db"
+    assert already.database_url == "postgresql+psycopg://u:p@host:5432/db"
