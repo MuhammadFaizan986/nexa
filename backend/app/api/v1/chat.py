@@ -13,14 +13,24 @@ Try it with curl (-N disables buffering so tokens appear as they arrive):
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, SessionDep
-from app.db.models import Conversation, Document, Message, MessageCitation, MessageRole, Tenant
+from app.db.models import (
+    Conversation,
+    Document,
+    Message,
+    MessageCitation,
+    MessageRole,
+    Tenant,
+    UsageEvent,
+    UsageEventType,
+)
 from app.schemas.chat import (
     ChatRequest,
     CitationOut,
@@ -41,6 +51,7 @@ router = APIRouter(tags=["chat"])
 )
 async def chat(body: ChatRequest, user: CurrentUser, session: SessionDep) -> StreamingResponse:
     settings = get_settings()
+    await _enforce_daily_limit(session, user.tenant_id, settings.max_questions_per_day)
     try:
         collection_ids = await resolve_search_scope(session, user, body.collection_ids)
     except CollectionAccessError:
@@ -162,6 +173,38 @@ async def get_conversation(
             for m in messages
         ],
     )
+
+
+async def _enforce_daily_limit(session, tenant_id: uuid.UUID, limit: int) -> None:
+    """
+    Stop a public demo from spending an unbounded amount of money.
+
+    Every answer costs real money at the model provider, so a link posted
+    somewhere busy is someone else's playground funded by us. Counting the
+    chat usage events already written for today is enough: it needs no new
+    table, and it counts exactly the calls that were actually billed.
+
+    MAX_QUESTIONS_PER_DAY=0 (the default) means no limit, which is what you
+    want locally.
+    """
+    if limit <= 0:
+        return
+    since = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    asked = await session.scalar(
+        select(func.count())
+        .select_from(UsageEvent)
+        .where(
+            UsageEvent.tenant_id == tenant_id,
+            UsageEvent.event_type == UsageEventType.CHAT,
+            UsageEvent.created_at >= since,
+        )
+    )
+    if (asked or 0) >= limit:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"This demo allows {limit} questions per day and today's are used up. "
+            "Try again tomorrow.",
+        )
 
 
 async def _get_own_conversation(session, user, conversation_id: uuid.UUID) -> Conversation:

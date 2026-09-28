@@ -66,6 +66,14 @@ async def upload_documents(
         str | None, Form(description='Optional JSON object, e.g. {"doc_type": "lease"}')
     ] = None,
 ) -> list[UploadResult]:
+    # A shared public demo shouldn't accept strangers' documents: they'd land in
+    # our storage and, on a free-tier embedding provider, in someone's training
+    # data. UPLOADS_ENABLED=false turns the whole route off.
+    if not get_settings().uploads_enabled:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Uploads are disabled on this demo. Ask questions about the documents already here.",
+        )
     collection = await session.get(Collection, collection_id)
     readable = await readable_collection_ids(session, user)
     if collection is None or collection.id not in readable:

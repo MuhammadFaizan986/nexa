@@ -240,6 +240,9 @@ async def answer_question(
     key = cache_key(
         "answer",
         question.id,
+        # The provider is part of the key, not just the model: an offline
+        # smoke run must never be served back as if a real model wrote it.
+        settings.llm_provider,
         settings.llm_model,
         [str(p.chunk_id) for p in passages],
         question.question,
@@ -528,12 +531,14 @@ def estimated_cost(questions: int, judge: bool) -> float:
     """
     A rough price for the run, printed BEFORE anything is spent.
 
-    Deliberately an over-estimate: ~1.5k input and 250 output tokens for an
-    answer, and the same again for a verdict. Cached questions cost nothing, so
-    the real figure is usually lower — the report prints what was actually spent.
+    Deliberately an over-estimate. The figures come from a measured run on
+    2026-09-21: Opus answers cost about $0.020 each (they think before
+    answering, so the output is longer than the answer text suggests) and a
+    Sonnet verdict about $0.006. Cached questions cost nothing, so the real
+    figure is usually lower — the report prints what was actually spent.
     """
-    per_answer = 0.013
-    per_verdict = 0.005 if judge else 0.0
+    per_answer = 0.022
+    per_verdict = 0.007 if judge else 0.0
     return questions * (per_answer + per_verdict)
 
 

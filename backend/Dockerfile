@@ -30,4 +30,6 @@ RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 COPY . .
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]
+# Railway (and most PaaS) inject the port to listen on as $PORT; locally there
+# is no such variable, so fall back to 8000 for docker compose.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log"]

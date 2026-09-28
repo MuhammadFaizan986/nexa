@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_refusal_fallback: bool = True
 
+    # ------------------------------------------------- public demo protection
+    # A public URL means strangers asking questions on YOUR API budget. These
+    # two settings are what make it safe to put the link on social media.
+    # 0 = no limit (the default, for local development).
+    max_questions_per_day: int = 0
+    # Turn uploads off for a shared demo: without this, anyone can put their
+    # own documents in your storage — and with a free-tier embedding provider,
+    # someone else's contract may end up training a model.
+    uploads_enabled: bool = True
+
     # ------------------------------------------------------------------ agent
     # Agentic RAG (Week 6): instead of one search, the model is given tools and
     # decides what to do — search again, read a document, compare two of them.
