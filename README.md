@@ -4,21 +4,62 @@ A private, multi-tenant AI knowledge assistant: upload your documents, ask
 questions, and get answers with **source citations** (document + page), while
 each organisation's data stays isolated and permission-controlled.
 
-Built from scratch (no LangChain/LlamaIndex) with FastAPI, PostgreSQL +
-pgvector, OpenAI or Gemini embeddings, and Anthropic Claude, following an
-8-week roadmap: hybrid search, reranking and evaluation (Week 3), groups,
-Row-Level Security and background jobs (Week 4), a web UI (Week 5), agentic
-RAG (Week 6), hardening and benchmarks (Week 7), and deployment (Week 8).
+### ▶ [Try the live demo](https://nexa-fawn-three.vercel.app)
 
-**Status: Weeks 0–5 complete.** The product has an ingestion pipeline,
-streaming chat with page-accurate citations, and hybrid retrieval (semantic +
-keyword + identifier boost, fused with RRF). It also has Cohere reranking,
-contextual chunk headers, metadata filters and a measured evaluation. On the
-50-question eval, hybrid + reranking finds the answer first 92% of the time and
-in the top 5 98% of the time: see
-[docs/evaluation-results.md](docs/evaluation-results.md). Week 4 added group
-permissions, PostgreSQL Row-Level Security and background ingestion; Week 5
-added the web interface.
+The sign-in details are filled in for you — press **Sign in** and ask a
+question. Three demo workspaces are loaded with synthetic documents: a property
+manager, a fintech and an internal company knowledge base. Uploads are disabled
+and questions are capped per day, because every answer costs real money at the
+model provider.
+
+Good questions to try:
+
+| Question | What it shows |
+|---|---|
+| What is the notice period for terminating the lease for Unit 4B? | a cited fact — click the source chip to read the exact sentence |
+| What does error code E-204 mean? *(Fintech workspace)* | exact-identifier search, which vector search alone gets wrong |
+| Is there a swimming pool in Building A? | it says "I don't have enough information" instead of inventing one |
+
+![The NEXA landing page](docs/screenshots/01-landing-hero.png)
+
+Built from scratch (no LangChain/LlamaIndex) with FastAPI, PostgreSQL +
+pgvector, Gemini or OpenAI embeddings, Cohere reranking and Anthropic Claude,
+following an 8-week roadmap.
+
+**Status: Weeks 0–6 complete and deployed.** Ingestion pipeline, streaming chat
+with page-accurate citations, hybrid retrieval (semantic + keyword + identifier
+boost, fused with RRF), Cohere reranking, contextual chunk headers, metadata
+filters, group permissions, PostgreSQL Row-Level Security, background
+ingestion, a web UI, follow-up query rewriting and agentic RAG with tools.
+179 tests. On the 50-question eval set, hybrid + reranking finds the answer
+first **92%** of the time and in the top 5 **98%** of the time —
+[the numbers and how they were measured](docs/evaluation-results.md).
+
+Remaining: Week 7 (hardening, prompt-injection tests, CI, benchmarks at scale).
+
+---
+
+## How an answer gets made
+
+Parsing → Chunking → Embedding → Vector DB → Reranking → AI model
+
+![The six stages of the pipeline](docs/screenshots/02-pipeline.png)
+
+| Stage | What happens | Where in the code |
+|---|---|---|
+| Parsing | PDFs, Word, Markdown, text, HTML and spreadsheets, keeping page numbers | `app/services/ingestion/parsers/` |
+| Chunking | passages that remember their page and section, prefixed with the document title | `app/services/ingestion/chunker.py` |
+| Embedding | each passage becomes a vector (Gemini or OpenAI) | `app/services/embeddings/` |
+| Vector DB | pgvector with an HNSW index, alongside Postgres full-text search | `app/services/retrieval/` |
+| Reranking | Cohere re-scores the shortlist — Hit@1 70% → 92% | `app/services/retrieval/reranker.py` |
+| Answer | Claude answers from those passages only, citing each one | `app/services/generation/` |
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Documents](docs/screenshots/05-documents.png) | ![Admin](docs/screenshots/06-admin.png) |
+| Drag-and-drop upload with live processing status | Cost per day, people, groups and collection grants |
 
 ---
 
@@ -38,7 +79,8 @@ make eval                     # measure retrieval quality on the 50-question eva
 
 **Web UI:** <http://localhost:3001> — sign in with a demo account, e.g. handle
 `harbourview-property-group`, `owner@harbourview.example.com` /
-`nexa-demo-password`.
+`nexa-demo-password`. To put your own copy online, see
+[docs/deployment.md](docs/deployment.md) (Railway + Vercel, about $8–10/month).
 
 Interactive API docs: <http://localhost:8010/docs>. Run `make help` for all
 shortcuts. Ports are 3001 (web), 8010 (API), 5433 (Postgres) and 6380 (Redis),
