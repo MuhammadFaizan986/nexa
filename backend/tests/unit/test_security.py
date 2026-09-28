@@ -55,3 +55,17 @@ def test_platform_database_urls_get_the_psycopg_driver():
     assert plain.database_url == "postgresql+psycopg://u:p@host:5432/db"
     assert longer.database_url == "postgresql+psycopg://u:p@host:5432/db"
     assert already.database_url == "postgresql+psycopg://u:p@host:5432/db"
+
+
+def test_cors_origins_tolerate_a_trailing_slash():
+    """
+    A browser sends `Origin: https://app.vercel.app` with no trailing slash, but
+    the URL you copy from the address bar has one. Left alone, that mismatch
+    rejects every request with "Disallowed CORS origin" — which looks like a
+    broken deployment instead of a typo.
+    """
+    from app.core.config import Settings
+
+    settings = Settings(cors_origins="https://app.vercel.app/, http://localhost:3001")
+
+    assert settings.cors_origins == ["https://app.vercel.app", "http://localhost:3001"]

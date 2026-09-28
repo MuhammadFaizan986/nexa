@@ -208,9 +208,18 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
-        # Accept "http://a, http://b" from .env as well as a JSON list.
+        """
+        Accept "http://a, http://b" from .env as well as a JSON list.
+
+        Trailing slashes are stripped because a browser's Origin header never
+        has one: copy "https://app.vercel.app/" out of the address bar into
+        CORS_ORIGINS and every request is rejected with "Disallowed CORS
+        origin", which looks like a broken app rather than a typo.
+        """
         if isinstance(value, str) and not value.strip().startswith("["):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
+            value = [origin.strip() for origin in value.split(",") if origin.strip()]
+        if isinstance(value, list):
+            return [o.rstrip("/") if isinstance(o, str) else o for o in value]
         return value
 
     @field_validator("db_app_role")
