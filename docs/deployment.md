@@ -88,8 +88,12 @@ index.
    | Variable | Value |
    |---|---|
    | `NEXT_PUBLIC_API_URL` | `https://<your-api>.up.railway.app/api/v1` |
+   | `NEXT_PUBLIC_DEMO_LOGIN` | omit for a demo; `false` for a real deployment |
 
-   This one is read at build time, so changing it later needs a redeploy.
+   Both are read at build time, so changing either needs a redeploy.
+   `NEXT_PUBLIC_DEMO_LOGIN=false` turns off the pre-filled demo credentials on
+   the sign-in page — leave it unset and a visitor can press one button to get
+   in, which is what you want when you send someone a link.
 4. Deploy, then go back to Railway and set `CORS_ORIGINS` to the Vercel URL.
    Without that, the browser blocks every API call and the UI just says
    "Something went wrong".

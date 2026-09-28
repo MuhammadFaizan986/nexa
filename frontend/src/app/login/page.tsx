@@ -17,14 +17,22 @@ const DEMOS = [
   { slug: "kestrel-pay", email: "owner@kestrelpay.example.com", label: "Fintech" },
   { slug: "lumen-labs", email: "owner@lumenlabs.example.com", label: "Company" },
 ];
+const DEMO_PASSWORD = "nexa-demo-password";
+
+/**
+ * On the public demo the form arrives already filled in, so a visitor who was
+ * sent a link can press one button and be inside. Anyone running NEXA for real
+ * sets NEXT_PUBLIC_DEMO_LOGIN=false and gets an empty form.
+ */
+const PREFILL = process.env.NEXT_PUBLIC_DEMO_LOGIN !== "false";
 
 export default function LoginPage() {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [organisation, setOrganisation] = useState("");
-  const [tenantSlug, setTenantSlug] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [tenantSlug, setTenantSlug] = useState(PREFILL ? DEMOS[0].slug : "");
+  const [email, setEmail] = useState(PREFILL ? DEMOS[0].email : "");
+  const [password, setPassword] = useState(PREFILL ? DEMO_PASSWORD : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -46,7 +54,7 @@ export default function LoginPage() {
     setMode("login");
     setTenantSlug(demo.slug);
     setEmail(demo.email);
-    setPassword("nexa-demo-password");
+    setPassword(DEMO_PASSWORD);
   }
 
   return (
@@ -72,6 +80,13 @@ export default function LoginPage() {
             ? "Sign in to ask questions across your documents."
             : "You'll be the owner, and can invite your team afterwards."}
         </p>
+
+        {PREFILL && mode === "login" && (
+          <p className="mt-4 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-xs text-brand">
+            Demo workspace — the details are filled in for you. Just press{" "}
+            <span className="font-semibold">Sign in</span>.
+          </p>
+        )}
 
         <div className="mt-6 flex gap-1 rounded-lg bg-canvas p-1 text-sm">
           {(["login", "register"] as const).map((option) => (
