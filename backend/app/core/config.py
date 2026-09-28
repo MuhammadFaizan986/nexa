@@ -89,6 +89,21 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_refusal_fallback: bool = True
 
+    # ------------------------------------------------- visit notifications
+    # Email me when somebody opens the demo. Off unless both the key and the
+    # destination are set, so nothing is sent by accident in development.
+    resend_api_key: SecretStr | None = None
+    notify_email_to: str | None = None
+    # Resend's shared sender works without owning a domain, but it can only
+    # deliver to the address that owns the Resend account.
+    notify_email_from: str = "NEXA <onboarding@resend.dev>"
+    # A public endpoint that sends email is a way to fill someone's inbox, so
+    # the sender refuses to exceed this many messages per hour.
+    notify_max_per_hour: int = 12
+    # Look the visitor's country up from their IP (via ipapi.co, best effort).
+    # It means sharing the IP with a third party, so it can be turned off.
+    visit_geo_lookup: bool = True
+
     # ------------------------------------------------- public demo protection
     # A public URL means strangers asking questions on YOUR API budget. These
     # two settings are what make it safe to put the link on social media.

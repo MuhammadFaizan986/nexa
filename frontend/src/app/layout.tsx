@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider, themeScript } from "@/components/theme";
+import { VisitPing } from "@/components/VisitPing";
 import { ToastProvider } from "@/components/ui";
 import "./globals.css";
 
@@ -29,6 +30,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <ToastProvider>
             <AuthProvider>{children}</AuthProvider>
+            {/* Tells the API a person arrived — once per session. */}
+            <VisitPing />
           </ToastProvider>
         </ThemeProvider>
       </body>

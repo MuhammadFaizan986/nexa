@@ -138,6 +138,35 @@ fine for synthetic demo documents, not for a stranger's real contract.
 **3. Rotate the secrets.** A fresh `JWT_SECRET`, and API keys that are not the
 ones sitting in your local `.env`.
 
+## Knowing when someone visits
+
+When the link goes out on LinkedIn or into an application, it is useful to know
+the moment somebody opens it. Set two variables on the API service and you get
+an email per visitor session:
+
+| Variable | Value |
+|---|---|
+| `RESEND_API_KEY` | from [resend.com](https://resend.com) — free tier is 3,000 emails/month |
+| `NOTIFY_EMAIL_TO` | your address (the one that owns the Resend account) |
+
+The email says when, which page, where they came from ("LinkedIn", "GitHub",
+"direct"), a rough location and whether it was a phone or a laptop.
+
+Worth being clear about what this cannot do: it cannot tell you **who** the
+visitor is. IP addresses carry no names, and the services that claim otherwise
+are guessing from corporate networks and are usually wrong. The genuinely
+useful field is the referrer, because it tells you which post is working.
+
+Guards, since the endpoint is public and unauthenticated:
+
+- one notification per browser session, not per page load;
+- a hard cap of `NOTIFY_MAX_PER_HOUR` messages (default 12);
+- the IP is used to look up a country and then discarded — never logged, never
+  stored. `VISIT_GEO_LOOKUP=false` turns even that off.
+
+Add `?ref=linkedin` to the link you post and the referrer tells you exactly
+which channel brought each visitor.
+
 ## What it costs
 
 Railway bills per second: roughly $10 per GB of RAM per month and $20 per vCPU

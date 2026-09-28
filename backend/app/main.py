@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import access, admin, auth, chat, collections, documents, health, search
+from app.api.v1 import access, admin, auth, chat, collections, documents, events, health, search
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     )
 
     api = APIRouter(prefix=API_PREFIX)
-    for module in (health, auth, access, admin, collections, documents, search, chat):
+    for module in (health, auth, access, admin, collections, documents, search, chat, events):
         api.include_router(module.router)
     app.include_router(api)
     return app
