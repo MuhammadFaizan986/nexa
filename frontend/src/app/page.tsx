@@ -128,14 +128,6 @@ export default function LandingPage() {
                 {user ? "Open NEXA" : "Try the demo"}
                 <ArrowRight size={16} className="transition group-hover:translate-x-0.5" />
               </Link>
-              <a
-                href="https://github.com/MuhammadFaizan986/nexa"
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-medium transition hover:bg-canvas"
-              >
-                See the code
-              </a>
             </div>
             <dl className="mt-10 flex gap-8">
               {[
